@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
 import { extractJsonLdEvent } from "../jsonLdEvent";
@@ -114,8 +115,8 @@ export const makeOutRoomScraper: Scraper = {
             
             // Split content by horizontal rules to find separate events
             const content = $detail("#wsite-content, .blog-post-content, .blog-post").first();
-            const sections: cheerio.Cheerio[] = [];
-            let currentSection: cheerio.Element[] = [];
+            const sections: cheerio.Cheerio<AnyNode>[] = [];
+            let currentSection: AnyNode[] = [];
             
             content.children().each((_, child) => {
               const $child = $detail(child);
