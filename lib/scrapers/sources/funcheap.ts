@@ -36,6 +36,60 @@ function toISO(year: number, month: number, day: number, hours: number, minutes:
   return new Date(year, month, day, hours, minutes, 0).toISOString();
 }
 
+type CheerioAPI = ReturnType<typeof cheerio.load>;
+type CheerioEl = ReturnType<CheerioAPI>;
+
+/** Extract venue/location from a row or container. Tries multiple patterns used on Funcheap. */
+function extractVenue($: CheerioAPI, $container: CheerioEl): string | null {
+  const html = $container.html() ?? "";
+  const text = $container.text();
+
+  // 1. "| <span>Venue Name</span>" (current pattern)
+  let m = html.match(/\|\s*<span>([^<]+)<\/span>/);
+  if (m?.[1]) return m[1].trim();
+
+  // 2. Pipe + any text (with or without tags after): "| Venue Name" or "| Venue</a>"
+  m = html.match(/\|\s*([^|<]+?)(?:\s*<|\s*$)/);
+  if (m?.[1]) {
+    const v = m[1].trim();
+    if (v.length > 1 && v.length < 80 && !/^\d{1,2}:\d{2}\s*[ap]m$/i.test(v)) return v;
+  }
+
+  // 3. Plain text: " | Venue Name" or " at Venue Name" or " @ Venue Name"
+  m = text.match(/\s[\|@]\s*([^|\n]+?)(?:\s*\||\s*FREE|$)/i);
+  if (m?.[1]) {
+    const v = m[1].trim();
+    if (v.length > 1 && v.length < 80 && !/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(v)) return v;
+  }
+  m = text.match(/\s+at\s+([^|\n]+?)(?:\s*\||\s*FREE|$)/i);
+  if (m?.[1]) {
+    const v = m[1].trim();
+    if (v.length > 1 && v.length < 80) return v;
+  }
+
+  // 4. Elements with venue/location class
+  const $venue = $container.find(".venue, .location, [class*='venue'], [class*='location']").first();
+  if ($venue.length) {
+    const v = $venue.text().trim();
+    if (v.length > 1 && v.length < 80) return v;
+  }
+
+  // 5. Td that looks like a venue (short, not time, not day name) - e.g. second or third column
+  const tds: string[] = [];
+  $container.find("td").each((_, td) => {
+    const t = $(td).text().trim();
+    if (t.length >= 2 && t.length <= 60 && !/^\d{1,2}(?::\d{2})?\s*[ap]m$/i.test(t) && !/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i.test(t)) {
+      tds.push(t);
+    }
+  });
+  if (tds.length >= 2) {
+    const candidate = tds[tds.length - 1];
+    if (candidate && candidate.length < 50) return candidate;
+  }
+
+  return null;
+}
+
 export const funcheapScraper: Scraper = {
   id: "funcheap",
   name: "Funcheap SF",
@@ -89,16 +143,11 @@ export const funcheapScraper: Scraper = {
         }
       }
 
-      // Location: "| <span>Venue Name</span>" in row or in preceding featured block
-      let locationName: string | null = null;
-      const rowHtml = $tr.html() ?? "";
-      const venueMatch = rowHtml.match(/\|\s*<span>([^<]+)<\/span>/);
-      if (venueMatch) locationName = venueMatch[1].trim();
+      // Location: extract venue from row (or previous row for featured layout)
+      let locationName = extractVenue($, $tr);
       if (!locationName) {
         const $prev = $tr.prevAll("tr").first();
-        const prevHtml = $prev.find("td").html() ?? "";
-        const prevVenue = prevHtml.match(/\|\s*<span>([^<]+)<\/span>/);
-        if (prevVenue) locationName = prevVenue[1].trim();
+        if ($prev.length) locationName = extractVenue($, $prev);
       }
 
       events.push({
@@ -141,11 +190,8 @@ export const funcheapScraper: Scraper = {
           }
         }
 
-        // Location: "| <span>Venue Name</span>" in same block
-        let locationName: string | null = null;
-        const parentHtml = $parent.html() ?? "";
-        const venueMatch = parentHtml.match(/\|\s*<span>([^<]+)<\/span>/);
-        if (venueMatch) locationName = venueMatch[1].trim();
+        // Location: extract venue from same block
+        const locationName = extractVenue($, $parent);
 
         events.push({
           title,

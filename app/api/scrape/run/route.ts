@@ -33,8 +33,8 @@ function toFirestoreDoc(normalized: NormalizedEvent): Record<string, unknown> {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** Only scrape events starting within this many days from now. */
-const SCRAPE_WINDOW_DAYS = 7;
+/** Only scrape events starting within this many days from now (default: next 3 months). */
+const SCRAPE_WINDOW_DAYS = 90;
 
 export async function POST(req: NextRequest) {
   const dryRun = new URL(req.url ?? "/", "http://localhost").searchParams.get("dryRun") === "true";
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
             scraper.name,
             eventId
           );
-          if (normalized.startAt > cutoff) continue; // beyond 1-week window: skip
+          if (normalized.startAt > cutoff) continue; // beyond scrape window: skip
           if (!dryRun && col) {
             const doc = toFirestoreDoc(normalized);
             await col.doc(eventId).set(doc, { merge: true });

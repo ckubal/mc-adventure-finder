@@ -567,34 +567,6 @@ export function AgendaList() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => handleRefresh(true)}
-              disabled={refreshing}
-              className="px-3 py-1.5 text-sm font-bold border-2 border-black"
-              style={{
-                background: "linear-gradient(135deg, #ffff00, #ff00ff)",
-                color: "#000",
-                textShadow: "1px 1px 0px #fff",
-                boxShadow: "3px 3px 0px #000",
-                opacity: refreshing ? 0.6 : 1,
-                cursor: refreshing ? "not-allowed" : "pointer"
-              }}
-              onMouseEnter={(e) => {
-                if (!refreshing) {
-                  e.currentTarget.style.transform = "translate(2px, 2px)";
-                  e.currentTarget.style.boxShadow = "1px 1px 0px #000";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!refreshing) {
-                  e.currentTarget.style.transform = "translate(0, 0)";
-                  e.currentTarget.style.boxShadow = "3px 3px 0px #000";
-                }
-              }}
-            >
-              {refreshing ? `Scraping… ${scrapeElapsed}s` : "🧪 Test run (no save)"}
-            </button>
-            <button
-              type="button"
               onClick={() => handleRefresh(false)}
               disabled={refreshing}
               className="px-3 py-1.5 text-sm font-bold border-2 border-black"
