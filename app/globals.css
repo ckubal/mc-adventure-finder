@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Classic 2000s Internet Aesthetic */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@keyframes rainbow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+
+body {
+  background: linear-gradient(135deg, #ff00ff 0%, #00ffff 50%, #ffff00 100%);
+  background-size: 200% 200%;
+  animation: rainbow 10s ease infinite;
+  color: #000;
+  font-family: "Comic Sans MS", "Trebuchet MS", Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* Retro scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: linear-gradient(180deg, #ff00ff, #00ffff);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #ffff00, #ff00ff);
+  border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #ff00ff, #ffff00);
+}

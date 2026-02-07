@@ -1,0 +1,21 @@
+# Render Blueprint for mc-adventure-finder
+# Deploy: connect your repo at https://dashboard.render.com and use "New" → "Blueprint"
+# Or create a Web Service manually and use the same build/start commands.
+
+services:
+  - type: web
+    name: mc-adventure-finder
+    runtime: node
+    region: oregon
+
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Add the rest in Render Dashboard → Environment:
+      # NEXT_PUBLIC_BASE_PATH (empty for metime.weirdlittleideas.com, or /metime for xxx.onrender.com/metime)
+      # NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID, etc.
+      # FIREBASE_PROJECT_ID, FIREBASE_SERVICE_ACCOUNT_KEY (or FIREBASE_SERVICE_ACCOUNT_PATH)
+      # AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET (optional)
