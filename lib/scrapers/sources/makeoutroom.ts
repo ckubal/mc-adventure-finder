@@ -86,14 +86,14 @@ export const makeOutRoomScraper: Scraper = {
       
       const fullUrl = href.startsWith("http") ? href : new URL(href.replace(/^\/\//, "http://"), base).href;
       
-      // Fetch detail page to extract multiple events
+      // Fetch detail page to extract multiple events (store date in raw for detail parsing)
       events.push({
         title,
         startAt: "", // Will be set after parsing detail page
         sourceUrl: fullUrl,
         locationName: "Make-Out Room",
         tags: ["concert"],
-        _detailDate: { year, month, day }, // Store date for detail page parsing
+        raw: { _detailDate: { year, month, day } },
       });
     });
 
@@ -109,7 +109,7 @@ export const makeOutRoomScraper: Scraper = {
             const pageEvents: RawEvent[] = [];
             
             // Extract date from stored date or from URL/page title
-            const dateInfo = (event as any)._detailDate;
+            const dateInfo = (event.raw as { _detailDate?: { year: number; month: number; day: number } })?._detailDate;
             if (!dateInfo) return [];
             
             // Split content by horizontal rules to find separate events
