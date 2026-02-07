@@ -9,8 +9,10 @@ import type { EventStatus } from "@/types";
 import {
   groupEventsByAgenda,
   getGroupLabel,
+  startOfTodayLA,
   type AgendaGroupKey,
 } from "@/lib/agenda/groupEvents";
+import { VENUE_CATEGORIES } from "@/lib/venue-categories";
 import { EventCard } from "./EventCard";
 
 const ORDER: AgendaGroupKey[] = ["today", "this_week", "later"];
@@ -76,8 +78,10 @@ export function AgendaList() {
 
   // Filter by source and date - memoized to ensure correct recomputation
   const filteredEvents = useMemo(() => {
-    // Filter by source first - always apply when sources are selected
-    let filtered = events;
+    const todayStart = startOfTodayLA();
+    // Exclude past events (API should already filter; this is a safety net)
+    let filtered = events.filter((e) => new Date(e.startAt) >= todayStart);
+    // Filter by source when sources are selected
     if (selectedSourceIds.size > 0) {
       filtered = filtered.filter((e) => selectedSourceIds.has(e.sourceId));
     }
@@ -123,6 +127,32 @@ export function AgendaList() {
       return next;
     });
   }, []);
+
+  const applyCategory = useCallback((sourceIds: string[] | null) => {
+    if (sourceIds === null) {
+      setSelectedSourceIds(new Set(sources.map((s) => s.sourceId)));
+      return;
+    }
+    const available = new Set(sources.map((s) => s.sourceId));
+    setSelectedSourceIds(new Set(sourceIds.filter((id) => available.has(id))));
+  }, [sources]);
+
+  const isAllSelected = sources.length > 0 && selectedSourceIds.size === sources.length;
+  const activeCategoryId = useMemo(() => {
+    if (isAllSelected) return "all";
+    const sourceIdSet = new Set(sources.map((s) => s.sourceId));
+    for (const cat of VENUE_CATEGORIES) {
+      const catIdsInSources = cat.sourceIds.filter((id) => sourceIdSet.has(id));
+      if (
+        catIdsInSources.length > 0 &&
+        selectedSourceIds.size === catIdsInSources.length &&
+        catIdsInSources.every((id) => selectedSourceIds.has(id))
+      ) {
+        return cat.id;
+      }
+    }
+    return null;
+  }, [selectedSourceIds, sources]);
 
   const fetchEvents = useCallback(async () => {
     try {
@@ -412,6 +442,70 @@ export function AgendaList() {
           </span>
         )}
       </div>
+
+      {/* Category quick-filters (select just those venues) */}
+      {sources.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 p-3 border-4 border-black" style={{
+          background: "linear-gradient(135deg, #ff00ff, #ffff00)",
+          boxShadow: "5px 5px 0px #000"
+        }}>
+          <span className="text-xs font-bold" style={{ color: "#000", textShadow: "1px 1px 0px #fff" }}>📂 Categories:</span>
+          <button
+            type="button"
+            onClick={() => applyCategory(null)}
+            className="px-3 py-1.5 text-sm font-bold border-2 border-black transition"
+            style={{
+              background: activeCategoryId === "all" ? "linear-gradient(135deg, #ff00ff, #00ffff)" : "linear-gradient(135deg, #ccc, #999)",
+              color: "#000",
+              textShadow: "1px 1px 0px #fff",
+              boxShadow: activeCategoryId === "all" ? "3px 3px 0px #000" : "2px 2px 0px #000",
+            }}
+            onMouseEnter={(e) => {
+              if (activeCategoryId !== "all") {
+                e.currentTarget.style.transform = "translate(2px, 2px)";
+                e.currentTarget.style.boxShadow = "1px 1px 0px #000";
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translate(0, 0)";
+              e.currentTarget.style.boxShadow = activeCategoryId === "all" ? "3px 3px 0px #000" : "2px 2px 0px #000";
+            }}
+          >
+            All
+          </button>
+          {VENUE_CATEGORIES.map((cat) => {
+            const isActive = activeCategoryId === cat.id;
+            const countInSources = cat.sourceIds.filter((id) => sources.some((s) => s.sourceId === id)).length;
+            if (countInSources === 0) return null;
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => applyCategory(cat.sourceIds)}
+                className="px-3 py-1.5 text-sm font-bold border-2 border-black transition"
+                style={{
+                  background: isActive ? "linear-gradient(135deg, #ff00ff, #00ffff)" : "linear-gradient(135deg, #ccc, #999)",
+                  color: "#000",
+                  textShadow: "1px 1px 0px #fff",
+                  boxShadow: isActive ? "3px 3px 0px #000" : "2px 2px 0px #000",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.transform = "translate(2px, 2px)";
+                    e.currentTarget.style.boxShadow = "1px 1px 0px #000";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translate(0, 0)";
+                  e.currentTarget.style.boxShadow = isActive ? "3px 3px 0px #000" : "2px 2px 0px #000";
+                }}
+              >
+                {cat.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Source Filters */}
       {sources.length > 0 && (

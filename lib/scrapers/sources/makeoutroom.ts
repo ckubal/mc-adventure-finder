@@ -137,7 +137,21 @@ export const makeOutRoomScraper: Scraper = {
             if (sections.length === 0) {
               sections.push(content);
             }
-            
+
+            // If we have only one section but content has multiple times (e.g. "8:00pm ... 9:30pm ..."), split by time to get multiple events
+            if (sections.length === 1) {
+              const fullText = content.text();
+              const timeSplitRegex = /\s+(?=\d{1,2}(?::\d{2})?\s*[ap]m\b)/gi;
+              const parts = fullText.split(timeSplitRegex).map((p) => p.trim()).filter((p) => p.length > 15);
+              if (parts.length > 1) {
+                sections.length = 0;
+                parts.forEach((part) => {
+                  const $fake = cheerio.load(`<div>${part.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`);
+                  sections.push($fake("div"));
+                });
+              }
+            }
+
             // Parse each section as a potential event
             sections.forEach((section, idx) => {
               const text = section.text().trim();
@@ -183,6 +197,10 @@ export const makeOutRoomScraper: Scraper = {
               
               // Clean up title - remove leading/trailing punctuation
               title = title.replace(/^[:\-~]+\s*/, "").replace(/\s*[:\-~]+$/, "").trim();
+              // If parsed title looks like a date (e.g. "Saturday, February 7") or just a time ("8:00pm"), use listing title
+              if (event.title && (/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,\s+[A-Za-z]+\s+\d{1,2}$/i.test(title.trim()) || /^\d{1,2}(?::\d{2})?\s*[ap]m$/i.test(title.trim()))) {
+                title = event.title;
+              }
               if (!title || title.length < 2) return;
               
               // Extract time from text (e.g. "10:00pm - 2:00am" or "7:00pm - 9:30pm")
@@ -235,16 +253,16 @@ export const makeOutRoomScraper: Scraper = {
               ...event,
               startAt: new Date(dateInfo.year, dateInfo.month, dateInfo.day, 20, 0, 0).toISOString(),
             }]; // Fallback to original event if no sub-events found
-          } catch (err) {
+          } catch {
             // If detail page parsing fails, use the original event with default time
-            const dateInfo = (event as any)._detailDate;
+            const dateInfo = (event.raw as { _detailDate?: { year: number; month: number; day: number } })?._detailDate;
             if (dateInfo) {
               return [{
                 ...event,
                 startAt: new Date(dateInfo.year, dateInfo.month, dateInfo.day, 20, 0, 0).toISOString(),
               }];
             }
-            return [event];
+            return [];
           }
         })
       );

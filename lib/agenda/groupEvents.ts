@@ -12,8 +12,8 @@ export interface EventWithStart {
   startAt: string; // ISO
 }
 
-/** Start of today 00:00 in America/Los_Angeles as a UTC Date */
-function startOfTodayLA(): Date {
+/** Start of today 00:00 in America/Los_Angeles as a UTC Date. Exported for UI filtering. */
+export function startOfTodayLA(): Date {
   const now = new Date();
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: DEFAULT_TIMEZONE,

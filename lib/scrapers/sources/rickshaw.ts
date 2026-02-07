@@ -47,6 +47,8 @@ function parseDate(dateStr: string, timeStr: string): string {
 const DETAIL_FETCH_TIMEOUT_MS = 8_000;
 const CONCURRENCY = 5;
 
+const MAX_CALENDAR_PAGES = 5;
+
 export const rickshawScraper: Scraper = {
   id: "rickshaw",
   name: "Rickshaw Stop",
@@ -56,9 +58,25 @@ export const rickshawScraper: Scraper = {
   },
 
   async parse(html: string): Promise<RawEvent[]> {
-    const $ = cheerio.load(html);
-    const events: RawEvent[] = [];
     const base = new URL(CALENDAR_URL);
+    const allHtml: string[] = [html];
+    const events: RawEvent[] = [];
+
+    // Fetch additional calendar pages (Rickshaw uses ?list1page=N)
+    for (let page = 2; page <= MAX_CALENDAR_PAGES; page++) {
+      try {
+        const pageUrl = `${CALENDAR_URL}?list1page=${page}`;
+        const nextHtml = await fetchHtml(pageUrl);
+        const $p = cheerio.load(nextHtml);
+        if ($p(".seetickets-list-event-container").length === 0) break;
+        allHtml.push(nextHtml);
+      } catch {
+        break;
+      }
+    }
+
+    for (const pageHtml of allHtml) {
+      const $ = cheerio.load(pageHtml);
 
     // Rickshaw Stop uses .seetickets-list-event-container for each event.
     $(".seetickets-list-event-container").each((_, el) => {
@@ -121,11 +139,20 @@ export const rickshawScraper: Scraper = {
         tags: ["concert"],
       });
     });
+    }
+
+    // Dedupe by sourceUrl (same event might appear on multiple pages)
+    const seen = new Set<string>();
+    const uniqueEvents = events.filter((e) => {
+      if (seen.has(e.sourceUrl)) return false;
+      seen.add(e.sourceUrl);
+      return true;
+    });
 
     // Enrich with descriptions from detail pages
     const enrichedEvents: RawEvent[] = [];
-    for (let i = 0; i < events.length; i += CONCURRENCY) {
-      const chunk = events.slice(i, i + CONCURRENCY);
+    for (let i = 0; i < uniqueEvents.length; i += CONCURRENCY) {
+      const chunk = uniqueEvents.slice(i, i + CONCURRENCY);
       const enriched = await Promise.all(
         chunk.map(async (event) => {
           try {
