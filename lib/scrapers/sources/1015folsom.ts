@@ -30,7 +30,10 @@ function parseDateFromHeading(dateText: string): { year: number; month: number; 
   return { year, month, day };
 }
 
-function findTicketUrl($: cheerio.CheerioAPI, $column: cheerio.Cheerio<cheerio.Element>): string | null {
+function findTicketUrl(
+  $: cheerio.CheerioAPI,
+  $column: ReturnType<cheerio.CheerioAPI["load"]> extends (selector: string) => infer R ? R : never
+): string | null {
   const $container = $column.closest(".vc_column-inner");
   if (!$container.length) return null;
   const links = $container.find('a[target="_blank"][href]');
