@@ -15,6 +15,7 @@ export const VENUE_CATEGORIES: { id: string; label: string; sourceIds: string[] 
       "sfjazz",
       "makeoutroom",
       "brickandmortar",
+      "1015folsom",
     ],
   },
   {

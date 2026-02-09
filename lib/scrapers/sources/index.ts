@@ -14,6 +14,7 @@ import { punchLineScraper } from "./punchline";
 import { funcheapScraper } from "./funcheap";
 import { bottomOfTheHillScraper } from "./bottomofthehill";
 import { sfjazzScraper } from "./sfjazz";
+import { folsom1015Scraper } from "./1015folsom";
 
 export function registerAllScrapers(): void {
   registerScraper(greenAppleScraper);
@@ -31,6 +32,7 @@ export function registerAllScrapers(): void {
   registerScraper(funcheapScraper);
   registerScraper(bottomOfTheHillScraper);
   registerScraper(sfjazzScraper);
+  registerScraper(folsom1015Scraper);
 }
 
 export {
@@ -49,4 +51,5 @@ export {
   funcheapScraper,
   bottomOfTheHillScraper,
   sfjazzScraper,
+  folsom1015Scraper,
 };

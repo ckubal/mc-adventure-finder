@@ -39,55 +39,27 @@ function toISO(year: number, month: number, day: number, hours: number, minutes:
 type CheerioAPI = ReturnType<typeof cheerio.load>;
 type CheerioEl = ReturnType<CheerioAPI>;
 
-/** Extract venue/location from a row or container. Tries multiple patterns used on Funcheap. */
-function extractVenue($: CheerioAPI, $container: CheerioEl): string | null {
-  const html = $container.html() ?? "";
-  const text = $container.text();
+/**
+ * Extract venue from Funcheap DOM structure only.
+ * On the site, featured events have: .meta.date-time (or .fc-event-endtime-set) containing
+ * "Cost: ... | <span>Venue Name</span>". The venue is the bare <span> after the pipe
+ * (not inside .cost, not inside .tt tooltip, not a time span).
+ */
+function extractVenueFromStructure($: CheerioAPI, $container: CheerioEl): string | null {
+  const $meta = $container.find(".meta.date-time, .fc-event-endtime-set").first();
+  if (!$meta.length) return null;
 
-  // 1. "| <span>Venue Name</span>" (current pattern)
-  let m = html.match(/\|\s*<span>([^<]+)<\/span>/);
-  if (m?.[1]) return m[1].trim();
-
-  // 2. Pipe + any text (with or without tags after): "| Venue Name" or "| Venue</a>"
-  m = html.match(/\|\s*([^|<]+?)(?:\s*<|\s*$)/);
-  if (m?.[1]) {
-    const v = m[1].trim();
-    if (v.length > 1 && v.length < 80 && !/^\d{1,2}:\d{2}\s*[ap]m$/i.test(v)) return v;
-  }
-
-  // 3. Plain text: " | Venue Name" or " at Venue Name" or " @ Venue Name"
-  m = text.match(/\s[\|@]\s*([^|\n]+?)(?:\s*\||\s*FREE|$)/i);
-  if (m?.[1]) {
-    const v = m[1].trim();
-    if (v.length > 1 && v.length < 80 && !/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(v)) return v;
-  }
-  m = text.match(/\s+at\s+([^|\n]+?)(?:\s*\||\s*FREE|$)/i);
-  if (m?.[1]) {
-    const v = m[1].trim();
-    if (v.length > 1 && v.length < 80) return v;
-  }
-
-  // 4. Elements with venue/location class
-  const $venue = $container.find(".venue, .location, [class*='venue'], [class*='location']").first();
-  if ($venue.length) {
-    const v = $venue.text().trim();
-    if (v.length > 1 && v.length < 80) return v;
-  }
-
-  // 5. Td that looks like a venue (short, not time, not day name) - e.g. second or third column
-  const tds: string[] = [];
-  $container.find("td").each((_, td) => {
-    const t = $(td).text().trim();
-    if (t.length >= 2 && t.length <= 60 && !/^\d{1,2}(?::\d{2})?\s*[ap]m$/i.test(t) && !/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)/i.test(t)) {
-      tds.push(t);
-    }
+  // Venue is the last <span> in this block that is not cost, not tooltip, not time
+  const excludeSelector = ".cost, .tt, .fc-event-start-time, .fc-event-end-time, .fc-event-time-copy-sep, .fc-event-time-copy";
+  let venue: string | null = null;
+  $meta.find("span").each((_, el) => {
+    const $span = $(el);
+    if ($span.closest(excludeSelector).length) return;
+    if ($span.hasClass("cost") || $span.hasClass("fc-event-start-time") || $span.hasClass("fc-event-end-time") || $span.hasClass("fc-event-time-copy-sep") || $span.hasClass("fc-event-time-copy")) return;
+    const t = $span.text().trim();
+    if (t.length > 0 && t.length < 100) venue = t;
   });
-  if (tds.length >= 2) {
-    const candidate = tds[tds.length - 1];
-    if (candidate && candidate.length < 50) return candidate;
-  }
-
-  return null;
+  return venue;
 }
 
 export const funcheapScraper: Scraper = {
@@ -143,19 +115,15 @@ export const funcheapScraper: Scraper = {
         }
       }
 
-      // Location: extract venue from row (or previous row for featured layout)
-      let locationName = extractVenue($, $tr);
-      if (!locationName) {
-        const $prev = $tr.prevAll("tr").first();
-        if ($prev.length) locationName = extractVenue($, $prev);
-      }
+      // Location: from DOM only — .meta.date-time contains " | <span>Venue</span>" (featured blocks only)
+      const locationName = extractVenueFromStructure($, $tr);
 
       events.push({
         title,
         startAt,
         sourceUrl: fullUrl,
         description,
-        locationName,
+        locationName: locationName || undefined,
         tags: [],
       });
     });
@@ -190,15 +158,15 @@ export const funcheapScraper: Scraper = {
           }
         }
 
-        // Location: extract venue from same block
-        const locationName = extractVenue($, $parent);
+        // Location: from DOM only — .meta.date-time span (venue) in same block
+        const locationName = extractVenueFromStructure($, $parent);
 
         events.push({
           title,
           startAt: toISO(currentDay!.year, currentDay!.month, currentDay!.day, 19, 0),
           sourceUrl: fullUrl,
           description,
-          locationName,
+          locationName: locationName || undefined,
           tags: [],
         });
       });
