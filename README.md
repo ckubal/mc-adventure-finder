@@ -1,4 +1,4 @@
-**mc-adventure-finder** — SF Bay Area events aggregator (m+c sf adventure finder). Lives at [metime.weirdlittleideas.com](https://metime.weirdlittleideas.com) or weirdlittleideas.com/metime.  
+**mc-adventure-finder** — SF Bay Area events aggregator (m+c sf adventure finder). Lives at [mc-adventure-finder.onrender.com](https://mc-adventure-finder.onrender.com/).  
 → **Render (recommended):** [DEPLOY_RENDER.md](./DEPLOY_RENDER.md) — use your existing Render account; no Hostinger upgrade.  
 → **Hostinger:** [DEPLOY_HOSTINGER.md](./DEPLOY_HOSTINGER.md) — requires Node.js–capable plan.
 

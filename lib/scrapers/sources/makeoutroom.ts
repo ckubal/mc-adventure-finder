@@ -152,8 +152,8 @@ export const makeOutRoomScraper: Scraper = {
               }
             }
 
-            // Parse each section as a potential event
-            sections.forEach((section, idx) => {
+            // Parse each section as a potential event (each gets unique sourceEventId so we don't overwrite in Firestore)
+            sections.forEach((section, sectionIdx) => {
               const text = section.text().trim();
               if (!text || text.length < 10) return;
               
@@ -239,10 +239,13 @@ export const makeOutRoomScraper: Scraper = {
                 description = descClean.slice(0, 300);
               }
               
+              const slug = title.slice(0, 50).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9\-_]/g, "") || String(sectionIdx);
+              const sourceEventId = `${startAt}_${slug}`;
               pageEvents.push({
                 title,
                 startAt,
                 sourceUrl: event.sourceUrl,
+                sourceEventId,
                 locationName: "Make-Out Room",
                 description,
                 tags: ["concert"],
