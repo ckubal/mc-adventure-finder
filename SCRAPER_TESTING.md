@@ -64,6 +64,13 @@ When testing a new scraper, verify:
 5. **Source URL**: Valid link to the event page
 6. **No duplicates**: Same event doesn't appear multiple times
 
+## Scrape window (months ahead)
+
+The `/api/scrape/run` pipeline only upserts events that start within a configurable window (default **90 days**).
+
+- **Env**: `SCRAPE_WINDOW_DAYS=90`
+- **Notes**: Some sources (notably Live Nation venues like `cobbs` and `punchline`) load more events via API pagination; those scrapers are implemented to fetch **at least** this window so we don’t miss “later” shows.
+
 ## Available Scrapers
 
 - `funcheap` - Funcheap SF

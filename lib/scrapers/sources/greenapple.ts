@@ -5,6 +5,7 @@ import { extractJsonLdEvent } from "../jsonLdEvent";
 
 const BASE_URL = "https://greenapplebooks.com";
 const EVENTS_URL = `${BASE_URL}/events`;
+const TARGET_DAYS_AHEAD = 60;
 
 function parseDate(dateStr: string, timeStr: string): string {
   // e.g. "Thu, 1/8/2026" and "7:00pm"
@@ -39,89 +40,97 @@ export const greenAppleScraper: Scraper = {
   name: "Green Apple Books",
 
   async fetch() {
-    return fetchHtml(EVENTS_URL);
+    // Green Apple has month-scoped list views at /events/YYYY/MM. The root /events only
+    // covers the current month; to hit a 60-day horizon we fetch multiple months.
+    const now = new Date();
+    const cutoff = new Date(now.getTime() + TARGET_DAYS_AHEAD * 24 * 60 * 60 * 1000);
+    const pages: string[] = [];
+
+    let y = now.getFullYear();
+    let m = now.getMonth(); // 0-based
+    for (let i = 0; i < 6; i++) {
+      const monthUrl = `${EVENTS_URL}/${y}/${String(m + 1).padStart(2, "0")}`;
+      pages.push(await fetchHtml(monthUrl));
+
+      // advance to next month
+      const nextMonth = new Date(y, m + 1, 1);
+      y = nextMonth.getFullYear();
+      m = nextMonth.getMonth();
+      if (nextMonth > cutoff) break;
+    }
+
+    return JSON.stringify(pages);
   },
 
   async parse(html: string): Promise<RawEvent[]> {
-    const $ = cheerio.load(html);
     const events: RawEvent[] = [];
     const base = new URL(EVENTS_URL);
+    const seenUrls = new Set<string>();
 
-    const navLikeTitles = /^(main\s+navigation|menu|events|home|about|contact|search|login|sign\s+in)$/i;
-    const dateOnlyTitle = /^([A-Za-z]+\s+)?\d{1,2}\/\d{1,2}\/\d{2,4}$|^[A-Za-z]+\s+\d{4}$/; // e.g. "2/1/2026" or "February 2026"
-
-    $(".event-item, .event, [class*='event']").each((_, el) => {
-      const $el = $(el);
-      const link = $el.find('a[href*="/events/"], a[href*="event"]').first().attr("href");
-      const title =
-        $el.find("h3, h2, .event-title, [class*='title']").first().text().trim() ||
-        $el.find("a").first().text().trim();
-      if (!title || title.length < 5 || navLikeTitles.test(title.trim()) || dateOnlyTitle.test(title.trim())) return;
-
-      let dateStr = "";
-      let timeStr = "7:00pm";
-      $el.find("time, .date, [class*='date']").each((__, node) => {
-        const text = $(node).text().trim();
-        if (/\d{1,2}\/\d{1,2}\/\d{4}/.test(text)) dateStr = text;
-      });
-      if (!dateStr) {
-        const fullText = $el.text();
-        const dateMatch = fullText.match(/(\w{3},?\s*)?(\d{1,2}\/\d{1,2}\/\d{4})/);
-        if (dateMatch) dateStr = dateMatch[0].trim();
+    const pages: string[] = (() => {
+      const trimmed = html.trim();
+      if (trimmed.startsWith("[")) {
+        try {
+          const arr = JSON.parse(trimmed) as unknown;
+          if (Array.isArray(arr) && arr.every((x) => typeof x === "string")) return arr as string[];
+        } catch {
+          // fall through
+        }
       }
-      const timeMatch = $el.text().match(/Time:\s*([^\n]+?)(?:\n|$)/i);
-      if (timeMatch) timeStr = timeMatch[1].trim();
+      return [html];
+    })();
 
-      let locationName: string | null = null;
-      let locationAddress: string | null = null;
-      const placeMatch = $el.text().match(/Place:\s*([^\n]+?)(?:\n|$)/i);
-      if (placeMatch) {
-        const place = placeMatch[1].trim();
-        const lines = place.split(/\s*\n\s*/).filter(Boolean);
-        locationName = lines[0] || null;
-        locationAddress = lines.slice(1).join(", ") || null;
-      }
+    function parseMonthPage(pageHtml: string) {
+      const $ = cheerio.load(pageHtml);
 
-      const href = link?.startsWith("http") ? link : new URL(link || "/", base).href;
-      const startAt = parseDate(dateStr, timeStr);
-      if (!startAt) return;
-
-      events.push({
-        title,
-        startAt,
-        sourceUrl: href,
-        locationName: locationName || undefined,
-        locationAddress: locationAddress || undefined,
-        tags: ["book"],
-      });
-    });
-
-    // Fallback: look for any list items or cards that look like events
-    if (events.length === 0) {
-      $("a[href*='/events/']").each((_, el) => {
-        const $a = $(el);
+      $("article.event-list").each((_, el) => {
+        const $el = $(el);
+        const $a = $el.find("h3.event-list__title a[href^='/event/']").first();
         const href = $a.attr("href");
         if (!href) return;
-        const title = $a.find("h3, h2").first().text().trim() || $a.text().trim().split("\n")[0]?.trim();
-        if (!title || title.length < 5 || navLikeTitles.test(title.trim()) || dateOnlyTitle.test(title.trim())) return;
-        const $parent = $a.closest("li, .event, [class*='event']");
-        const text = $parent.length ? $parent.text() : $a.parent().text();
-        const dateMatch = text.match(/(\w{3},?\s*)?(\d{1,2}\/\d{1,2}\/\d{4})/);
-        const timeMatch = text.match(/(\d{1,2}(?::\d{2})?\s*[ap]m)/i);
-        if (!dateMatch) return;
-        const dateStr = dateMatch[0].trim();
-        const timeStr = timeMatch ? timeMatch[1].trim() : "7:00pm";
+        const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
+        if (seenUrls.has(fullUrl)) return;
+
+        const title = $a.text().replace(/\s+/g, " ").trim();
+        if (!title || title.length < 3) return;
+
+        const text = $el.text().replace(/\s+/g, " ").trim();
+        const dateMatch = text.match(/Date:\s*([A-Za-z]{3},\s*\d{1,2}\/\d{1,2}\/\d{4})/i);
+        const timeMatch = text.match(/Time:\s*([0-9:\sAPMapm\-]+)(?:Place:|Sign Up|View Event Details|$)/i);
+        const dateStr = dateMatch?.[1]?.trim() ?? "";
+        const timeStr = (timeMatch?.[1]?.match(/(\d{1,2}(?::\d{2})?\s*[ap]m)/i)?.[1] ?? "7:00pm").trim();
+        if (!dateStr) return;
         const startAt = parseDate(dateStr, timeStr);
         if (!startAt) return;
-        const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
+
+        // Place parsing: first non-empty line after "Place:" is usually the venue name.
+        let locationName: string | undefined;
+        let locationAddress: string | undefined;
+        const placeBlock = text.split(/Place:\s*/i)[1];
+        if (placeBlock) {
+          const chunk = placeBlock.split(/Sign Up|View Event Details/i)[0] ?? placeBlock;
+          const parts = chunk.split(/ {2,}|\n/).map((s) => s.trim()).filter(Boolean);
+          if (parts.length > 0 && parts[0].length < 120) locationName = parts[0];
+          if (parts.length > 1) locationAddress = parts.slice(1, 5).join(", ").slice(0, 200);
+        }
+
+        const excerpt = $el.find(".event-list__excerpt, .event-list__body, p").first().text().trim();
+        const description = excerpt && excerpt.length > 20 ? excerpt.slice(0, 300) : null;
+
+        seenUrls.add(fullUrl);
         events.push({
           title,
           startAt,
           sourceUrl: fullUrl,
+          locationName: locationName || undefined,
+          locationAddress: locationAddress || undefined,
+          description,
           tags: ["book"],
         });
       });
     }
+
+    pages.forEach(parseMonthPage);
 
     // Enrich with descriptions from detail pages
     const enrichedEvents: RawEvent[] = [];

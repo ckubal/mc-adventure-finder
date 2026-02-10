@@ -1,10 +1,12 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchWithPlaywright } from "../fetchPlaywright";
-import { extractJsonLdEvent, titleFromJsonLdEvent, startDateFromJsonLdEvent } from "../jsonLdEvent";
+import { titleFromJsonLdEvent, startDateFromJsonLdEvent } from "../jsonLdEvent";
+import type { LiveNationVenueEvent } from "../liveNationVenue";
+import { fetchLiveNationVenueEventsJson } from "../liveNationVenue";
 
 const BASE_URL = "https://www.punchlinecomedyclub.com";
 const SHOWS_URL = `${BASE_URL}/shows`;
+const LIVE_NATION_VENUE_ID = "KovZpZAE6e7A";
 
 function parseDate(dateStr: string, timeStr: string): string {
   const trimmed = dateStr.trim();
@@ -51,15 +53,105 @@ function parseStartDate(iso: string): string | null {
   return d.toISOString();
 }
 
+function addressFromVenue(ev: LiveNationVenueEvent): string | null {
+  const loc = ev.venue?.location;
+  if (!loc) return null;
+  const parts = [
+    loc.street_address,
+    [loc.locality, loc.region].filter(Boolean).join(", "),
+    loc.postal_code,
+  ]
+    .map((s) => (typeof s === "string" ? s.trim() : ""))
+    .filter(Boolean);
+  return parts.length ? parts.join(" ") : null;
+}
+
+function parseLiveNationEventsJson(jsonText: string): RawEvent[] | null {
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+    const first = parsed[0] as Record<string, unknown>;
+    if (first == null || typeof first !== "object") return null;
+    if (!("datetime_local" in first) && !("start_datetime_utc" in first)) return null;
+
+    const events: RawEvent[] = [];
+    const seen = new Set<string>();
+
+    for (const item of parsed as LiveNationVenueEvent[]) {
+      const title = typeof item.name === "string" ? item.name.trim() : "";
+      if (title.length < 2) continue;
+
+      const dt = (typeof item.datetime_local === "string" && item.datetime_local) ||
+        (typeof item.start_datetime_utc === "string" && item.start_datetime_utc) ||
+        null;
+      if (!dt) continue;
+      const d = new Date(dt);
+      if (Number.isNaN(d.getTime())) continue;
+      const startAt = d.toISOString();
+
+      const sourceUrl = typeof item.url === "string" && item.url.startsWith("http")
+        ? item.url
+        : SHOWS_URL;
+
+      const sourceEventId =
+        (typeof item.tm_id === "string" && item.tm_id) ||
+        (typeof item.discovery_id === "string" && item.discovery_id) ||
+        (typeof item.id === "string" && item.id) ||
+        undefined;
+
+      const dedupeKey = sourceEventId ?? `${title}|${startAt}|${sourceUrl}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+
+      const description =
+        typeof item.important_info === "string" && item.important_info.trim().length > 0
+          ? item.important_info.trim()
+          : null;
+
+      events.push({
+        title,
+        startAt,
+        sourceUrl,
+        sourceEventId,
+        locationName: "Punch Line Comedy Club",
+        locationAddress: addressFromVenue(item),
+        description,
+        tags: ["comedy"],
+        raw: {
+          provider: "livenation",
+          venueId: LIVE_NATION_VENUE_ID,
+          tm_id: item.tm_id,
+          discovery_id: item.discovery_id,
+        },
+      });
+    }
+
+    return events;
+  } catch {
+    return null;
+  }
+}
+
 export const punchLineScraper: Scraper = {
   id: "punchline",
   name: "Punch Line Comedy Club",
 
   async fetch() {
-    return fetchWithPlaywright(SHOWS_URL);
+    // Live Nation sites only render ~one page of JSON-LD; additional events load via API on scroll.
+    // Fetch the venue API (via Playwright session) so we can grab months of events.
+    return fetchLiveNationVenueEventsJson({
+      venueId: LIVE_NATION_VENUE_ID,
+      showsUrl: SHOWS_URL,
+    });
   },
 
   parse(html: string): RawEvent[] {
+    const maybeJson = html.trim();
+    if (maybeJson.startsWith("[")) {
+      const ln = parseLiveNationEventsJson(maybeJson);
+      if (ln) return ln;
+    }
+
     const $ = cheerio.load(html);
     const events: RawEvent[] = [];
     const base = new URL(SHOWS_URL);

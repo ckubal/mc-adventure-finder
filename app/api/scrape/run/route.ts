@@ -6,6 +6,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/collections";
 import { Timestamp } from "firebase-admin/firestore";
 import type { NormalizedEvent } from "@/lib/scrapers/types";
+import { getScrapeWindowDays } from "@/lib/scrapers/scrapeWindow";
 
 registerAllScrapers();
 
@@ -33,9 +34,6 @@ function toFirestoreDoc(normalized: NormalizedEvent): Record<string, unknown> {
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-/** Only scrape events starting within this many days from now (default: next 3 months). */
-const SCRAPE_WINDOW_DAYS = 90;
-
 export async function POST(req: NextRequest) {
   const dryRun = new URL(req.url ?? "/", "http://localhost").searchParams.get("dryRun") === "true";
 
@@ -49,6 +47,8 @@ export async function POST(req: NextRequest) {
   const col = adminDb ? adminDb.collection(COLLECTIONS.EVENTS) : null;
   const SCRAPER_TIMEOUT_MS = 25_000;
   const now = new Date();
+  /** Only upsert events starting within this many days from now (default: next 3 months). */
+  const SCRAPE_WINDOW_DAYS = getScrapeWindowDays();
   const cutoff = new Date(now.getTime() + SCRAPE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
   async function runScraper(scraper: (typeof scrapers)[0]) {
