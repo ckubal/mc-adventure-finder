@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 import type { Scraper, RawEvent } from "../types";
 import { fetchWithPlaywrightAutoScroll } from "../fetchPlaywright";
 
@@ -13,6 +14,8 @@ function parseStartDate(iso: string): string | null {
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
+
+type CheerioAPI = ReturnType<typeof cheerio.load>;
 
 function parseEventbriteCardDateTime(text: string, now = new Date()): string | null {
   // Example: "Mon, Mar 2 • 7:00 PM + 9 more"
@@ -99,13 +102,13 @@ function eventIdFromEventbriteUrl(url: string): string | null {
 }
 
 function nearestAncestorWithDateTime(
-  $: cheerio.CheerioAPI,
-  $a: cheerio.Cheerio<cheerio.Element>,
+  $: CheerioAPI,
+  $a: cheerio.Cheerio<AnyNode>,
   eventId: string | null
-): cheerio.Cheerio<cheerio.Element> | null {
+): cheerio.Cheerio<AnyNode> | null {
   // Walk up a few levels until we find a container whose text includes a recognizable
   // "Mon, Mar 2 • 7:00 PM" pattern.
-  let $node: cheerio.Cheerio<cheerio.Element> = $a.parent() as unknown as cheerio.Cheerio<cheerio.Element>;
+  let $node: cheerio.Cheerio<AnyNode> = $a.parent() as unknown as cheerio.Cheerio<AnyNode>;
   for (let i = 0; i < 10; i++) {
     if (!$node || !$node.length) break;
     const text = $node.text().replace(/\s+/g, " ").trim();
@@ -124,7 +127,7 @@ function nearestAncestorWithDateTime(
       });
       if (ids.size <= 1) return $node;
     }
-    $node = $node.parent() as unknown as cheerio.Cheerio<cheerio.Element>;
+    $node = $node.parent() as unknown as cheerio.Cheerio<AnyNode>;
   }
   return null;
 }
