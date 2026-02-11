@@ -95,6 +95,8 @@ export async function fetchTicketmasterArtistEvents(opts: {
 
   const fetchViaPlaywright = async <T,>(url: string): Promise<T> => {
     if (!pw) {
+      // Ensure Playwright looks for browsers bundled with the app (not ephemeral OS cache).
+      process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
       const { chromium } = await import("playwright");
       const browser = await chromium.launch({ headless: true });
       const page = await browser.newPage({

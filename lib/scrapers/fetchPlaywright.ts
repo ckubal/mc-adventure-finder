@@ -3,6 +3,8 @@
  * Use in scrapers whose sites show "Loading…" in static HTML.
  */
 export async function fetchWithPlaywright(url: string): Promise<string> {
+  // Ensure Playwright looks for browsers bundled with the app (not ephemeral OS cache).
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
@@ -39,6 +41,8 @@ export async function fetchWithPlaywrightAutoScroll(
   const scrollWaitMs = opts?.scrollWaitMs ?? 1200;
   const stabilizeSelector = opts?.stabilizeSelector;
 
+  // Ensure Playwright looks for browsers bundled with the app (not ephemeral OS cache).
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {

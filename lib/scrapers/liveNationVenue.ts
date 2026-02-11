@@ -53,6 +53,8 @@ export async function fetchLiveNationVenueEventsJson(opts: {
     ? new Date(Date.now() + opts.maxDaysAhead * 24 * 60 * 60 * 1000)
     : getScrapeCutoffDate();
 
+  // Ensure Playwright looks for browsers bundled with the app (not ephemeral OS cache).
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
