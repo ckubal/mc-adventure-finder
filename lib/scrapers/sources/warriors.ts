@@ -11,6 +11,7 @@ export const warriorsScraper: Scraper = {
   async fetch() {
     const events = await fetchTicketmasterArtistEvents({
       artistId: ARTIST_ID,
+      warmUrl: ARTIST_URL,
       // Ticketmaster "artist" schedule for Warriors is already Chase Center home games.
       // Still apply scrape window cutoff in helper.
       maxPages: 5,

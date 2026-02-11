@@ -19,6 +19,7 @@ export const giantsScraper: Scraper = {
   async fetch() {
     const events = await fetchTicketmasterArtistEvents({
       artistId: ARTIST_ID,
+      warmUrl: ARTIST_URL,
       query: { home_away: "home" },
       // Giants have many pages; stop once beyond SCRAPE_WINDOW_DAYS.
       maxPages: 25,
