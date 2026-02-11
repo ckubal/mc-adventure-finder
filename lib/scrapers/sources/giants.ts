@@ -1,15 +1,32 @@
 import type { Scraper, RawEvent } from "../types";
-import { fetchTicketmasterArtistEvents } from "../ticketmasterArtistEvents";
+import { getScrapeCutoffDate } from "../scrapeWindow";
 
-const ARTIST_ID = "806016";
-const ARTIST_URL =
-  "https://www.ticketmaster.com/san-francisco-giants-tickets/artist/806016?home_away=home";
+const TEAM_ID = 137; // MLB Giants
+const ORACLE_PARK_ID = 2395;
 
-function isOraclePark(ev: { venue?: { name?: string; city?: string; state?: string } } | null | undefined): boolean {
-  const name = (ev?.venue?.name ?? "").toLowerCase();
-  const city = (ev?.venue?.city ?? "").toLowerCase();
-  const state = (ev?.venue?.state ?? "").toLowerCase();
-  return name.includes("oracle park") && city === "san francisco" && (state === "ca" || state === "");
+const UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+async function fetchJson<T>(url: string, timeoutMs = 15_000): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { "User-Agent": UA, Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function ymd(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export const giantsScraper: Scraper = {
@@ -17,57 +34,66 @@ export const giantsScraper: Scraper = {
   name: "SF Giants (Oracle Park)",
 
   async fetch() {
-    const events = await fetchTicketmasterArtistEvents({
-      artistId: ARTIST_ID,
-      warmUrl: ARTIST_URL,
-      query: { home_away: "home" },
-      // Giants have many pages; stop once beyond SCRAPE_WINDOW_DAYS.
-      maxPages: 25,
-      include: (ev) => isOraclePark(ev),
-    });
-    return JSON.stringify({ sourceUrl: ARTIST_URL, events });
+    const now = new Date();
+    const cutoff = getScrapeCutoffDate();
+    const url = new URL("https://statsapi.mlb.com/api/v1/schedule");
+    url.searchParams.set("sportId", "1");
+    url.searchParams.set("teamId", String(TEAM_ID));
+    url.searchParams.set("startDate", ymd(now));
+    url.searchParams.set("endDate", ymd(cutoff));
+    url.searchParams.set("hydrate", "venue,teams");
+    const json = await fetchJson<any>(url.toString());
+    return JSON.stringify(json);
   },
 
   parse(jsonText: string): RawEvent[] {
-    let payload: { sourceUrl: string; events: unknown } | null = null;
+    let payload: any;
     try {
-      payload = JSON.parse(jsonText) as { sourceUrl: string; events: unknown };
+      payload = JSON.parse(jsonText);
     } catch {
       return [];
     }
-    const sourceUrl = payload?.sourceUrl || ARTIST_URL;
-    const list = Array.isArray(payload?.events) ? payload.events : [];
+    const dates = Array.isArray(payload?.dates) ? payload.dates : [];
+    const now = new Date();
+    const cutoff = getScrapeCutoffDate();
 
     const out: RawEvent[] = [];
-    for (const item of list) {
-      const ev = item as any;
-      if (!isOraclePark(ev)) continue;
+    for (const day of dates) {
+      const games = Array.isArray(day?.games) ? day.games : [];
+      for (const g of games) {
+        const startRaw = String(g?.gameDate ?? "").trim();
+        const start = startRaw ? new Date(startRaw) : null;
+        if (!start || Number.isNaN(start.getTime())) continue;
+        if (start < now || start > cutoff) continue;
 
-      const title = String(ev?.title ?? "").trim();
-      const startRaw = String(ev?.dates?.startDate ?? "").trim();
-      const url = String(ev?.url ?? "").trim() || sourceUrl;
-      if (!title || !startRaw || !url) continue;
+        const venueId = g?.venue?.id;
+        const venueName = String(g?.venue?.name ?? "").trim();
+        const isOracle = venueId === ORACLE_PARK_ID || /oracle park/i.test(venueName);
+        if (!isOracle) continue;
 
-      const locationName = ev?.venue?.name ? String(ev.venue.name).trim() : "Oracle Park";
-      const city = ev?.venue?.city ? String(ev.venue.city).trim() : "San Francisco";
-      const state = ev?.venue?.state ? String(ev.venue.state).trim() : "CA";
-      const address = ev?.venue?.addressLineOne ? String(ev.venue.addressLineOne).trim() : "";
-      const locationAddress = [address, city, state].filter(Boolean).join(", ") || null;
+        const homeId = g?.teams?.home?.team?.id;
+        if (homeId !== TEAM_ID) continue;
 
-      out.push({
-        title,
-        startAt: new Date(startRaw).toISOString(),
-        sourceUrl: url,
-        sourceEventId: String(ev?.id ?? ev?.discoveryId ?? url),
-        locationName,
-        locationAddress,
-        tags: ["sports", "baseball"],
-        raw: {
-          ticketmasterId: ev?.id ?? null,
-          discoveryId: ev?.discoveryId ?? null,
-          timeZone: ev?.timeZone ?? null,
-        },
-      });
+        const awayName = String(g?.teams?.away?.team?.name ?? "").trim();
+        const title = awayName ? `San Francisco Giants vs. ${awayName}` : "San Francisco Giants Game";
+        const gamePk = String(g?.gamePk ?? "").trim();
+        const url = gamePk ? `https://www.mlb.com/gameday/${gamePk}` : "https://www.mlb.com/giants/schedule";
+
+        out.push({
+          title,
+          startAt: start.toISOString(),
+          sourceUrl: url,
+          sourceEventId: gamePk || url,
+          locationName: "Oracle Park",
+          locationAddress: "24 Willie Mays Plaza, San Francisco, CA",
+          tags: ["sports", "baseball"],
+          raw: {
+            provider: "mlb",
+            gamePk: g?.gamePk ?? null,
+            venueId: venueId ?? null,
+          },
+        });
+      }
     }
     return out;
   },
