@@ -19,6 +19,11 @@ export const VENUE_CATEGORIES: { id: string; label: string; sourceIds: string[] 
     ],
   },
   {
+    id: "sports",
+    label: "Sports",
+    sourceIds: ["warriors", "giants"],
+  },
+  {
     id: "books",
     label: "Books",
     sourceIds: ["greenapple", "booksmith"],
