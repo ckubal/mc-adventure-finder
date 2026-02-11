@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
 import { extractJsonLdEvent } from "../jsonLdEvent";
+import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://envelop.us";
 const EVENTS_URL = `${BASE_URL}/events`;
@@ -41,7 +42,7 @@ function parseDate(dateStr: string, timeStr: string): string {
       if (m[3] === "am" && hours === 12) hours = 0;
     }
   }
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 const DETAIL_FETCH_TIMEOUT_MS = 8_000;
@@ -90,7 +91,7 @@ export const envelopScraper: Scraper = {
       if (!title || title.length < 2) return;
       
       // Default time: 7:00pm
-      const startAt = new Date(year, month - 1, day, 19, 0, 0).toISOString();
+      const startAt = isoFromZonedParts({ year, month, day, hour: 19, minute: 0, second: 0 });
       
       const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
       events.push({

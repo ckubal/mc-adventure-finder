@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
 import { extractJsonLdEvent } from "../jsonLdEvent";
+import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://greenapplebooks.com";
 const EVENTS_URL = `${BASE_URL}/events`;
@@ -28,8 +29,7 @@ function parseDate(dateStr: string, timeStr: string): string {
       if (match[3] === "am" && hours === 12) hours = 0;
     }
   }
-  const d = new Date(year, month - 1, day, hours, minutes, 0);
-  return d.toISOString();
+  return isoFromZonedParts({ year, month, day, hour: hours, minute: minutes, second: 0 });
 }
 
 const DETAIL_FETCH_TIMEOUT_MS = 8_000;

@@ -3,6 +3,7 @@ import type { AnyNode } from "domhandler";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
 import { extractJsonLdEvent } from "../jsonLdEvent";
+import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "http://www.makeoutroom.com";
 const EVENTS_URL = `${BASE_URL}/events`;
@@ -42,7 +43,7 @@ function parseDate(dateStr: string, timeStr: string): string {
       if (m[3] === "am" && hours === 12) hours = 0;
     }
   }
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 const DETAIL_FETCH_TIMEOUT_MS = 8_000;
@@ -225,7 +226,14 @@ export const makeOutRoomScraper: Scraper = {
               if (timeParts[3].toLowerCase() === "pm" && hours < 12) hours += 12;
               if (timeParts[3].toLowerCase() === "am" && hours === 12) hours = 0;
               
-              const startAt = new Date(dateInfo.year, dateInfo.month, dateInfo.day, hours, minutes, 0).toISOString();
+              const startAt = isoFromZonedParts({
+                year: dateInfo.year,
+                month: dateInfo.month + 1,
+                day: dateInfo.day,
+                hour: hours,
+                minute: minutes,
+                second: 0,
+              });
               
               // Extract description
               let description: string | null = null;
@@ -254,7 +262,14 @@ export const makeOutRoomScraper: Scraper = {
             
             return pageEvents.length > 0 ? pageEvents : [{
               ...event,
-              startAt: new Date(dateInfo.year, dateInfo.month, dateInfo.day, 20, 0, 0).toISOString(),
+              startAt: isoFromZonedParts({
+                year: dateInfo.year,
+                month: dateInfo.month + 1,
+                day: dateInfo.day,
+                hour: 20,
+                minute: 0,
+                second: 0,
+              }),
             }]; // Fallback to original event if no sub-events found
           } catch {
             // If detail page parsing fails, use the original event with default time
@@ -262,7 +277,14 @@ export const makeOutRoomScraper: Scraper = {
             if (dateInfo) {
               return [{
                 ...event,
-                startAt: new Date(dateInfo.year, dateInfo.month, dateInfo.day, 20, 0, 0).toISOString(),
+                startAt: isoFromZonedParts({
+                  year: dateInfo.year,
+                  month: dateInfo.month + 1,
+                  day: dateInfo.day,
+                  hour: 20,
+                  minute: 0,
+                  second: 0,
+                }),
               }];
             }
             return [];

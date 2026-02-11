@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml } from "../fetchHtml";
+import { isoFromZonedParts } from "../timezone";
 
 const CALENDAR_URL = "https://sf.funcheap.com/events/san-francisco/";
 
@@ -33,7 +34,8 @@ function parseTime(text: string): { hours: number; minutes: number } {
 }
 
 function toISO(year: number, month: number, day: number, hours: number, minutes: number): string {
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  // Funcheap times are Pacific time; convert LA local -> UTC ISO deterministically.
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 type CheerioAPI = ReturnType<typeof cheerio.load>;

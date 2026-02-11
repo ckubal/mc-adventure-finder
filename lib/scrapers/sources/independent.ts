@@ -7,6 +7,7 @@ import {
   startDateFromJsonLdEvent,
   extractFallbackTitleFromJsonLd,
 } from "../jsonLdEvent";
+import { isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
 
 const BASE_URL = "https://www.theindependentsf.com";
 const CALENDAR_URL = `${BASE_URL}/calendar/`;
@@ -49,15 +50,12 @@ function parseDate(dateStr: string, timeStr: string): string {
       if (m[3] === "am" && hours === 12) hours = 0;
     }
   }
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 /** Parse ISO local or offset date (e.g. "2026-02-12T20:00" or "2026-02-12T20:00-08:00") to ISO string. */
 function parseStartDate(iso: string): string | null {
-  if (!iso || typeof iso !== "string") return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return parseIsoAssumingTimeZone(iso);
 }
 
 export const independentScraper: Scraper = {

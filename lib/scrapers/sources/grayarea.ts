@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
 import { extractJsonLdEvent } from "../jsonLdEvent";
+import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://grayarea.org";
 const EVENTS_URL = `${BASE_URL}/visit/events/`;
@@ -11,17 +12,41 @@ function parseDateFromText(text: string): string | null {
   const isoMatch = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (isoMatch) {
     const [, month, day, year] = isoMatch;
-    const d = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10), 19, 0, 0);
-    return d.toISOString();
+    return isoFromZonedParts({
+      year: parseInt(year, 10),
+      month: parseInt(month, 10),
+      day: parseInt(day, 10),
+      hour: 19,
+      minute: 0,
+      second: 0,
+    });
   }
   const shortMatch = text.match(/(\d{1,2})\/(\d{1,2})/);
   if (shortMatch) {
     const [, month, day] = shortMatch;
     const now = new Date();
     const year = now.getFullYear();
-    const d = new Date(year, parseInt(month, 10) - 1, parseInt(day, 10), 19, 0, 0);
-    if (d < now) d.setFullYear(year + 1);
-    return d.toISOString();
+    let y = year;
+    let candidate = new Date(isoFromZonedParts({
+      year: y,
+      month: parseInt(month, 10),
+      day: parseInt(day, 10),
+      hour: 19,
+      minute: 0,
+      second: 0,
+    }));
+    if (candidate < now) {
+      y = year + 1;
+      candidate = new Date(isoFromZonedParts({
+        year: y,
+        month: parseInt(month, 10),
+        day: parseInt(day, 10),
+        hour: 19,
+        minute: 0,
+        second: 0,
+      }));
+    }
+    return candidate.toISOString();
   }
   const monthMatch = text.match(/([A-Za-z]{3})\s+(\d{1,2})/);
   if (monthMatch) {
@@ -33,9 +58,14 @@ function parseDateFromText(text: string): string | null {
     if (m === undefined) return null;
     const now = new Date();
     const year = now.getFullYear();
-    const d = new Date(year, m, parseInt(monthMatch[2], 10), 19, 0, 0);
-    if (d < now) d.setFullYear(year + 1);
-    return d.toISOString();
+    const day = parseInt(monthMatch[2], 10);
+    let y = year;
+    let candidate = new Date(isoFromZonedParts({ year: y, month: m + 1, day, hour: 19, minute: 0, second: 0 }));
+    if (candidate < now) {
+      y = year + 1;
+      candidate = new Date(isoFromZonedParts({ year: y, month: m + 1, day, hour: 19, minute: 0, second: 0 }));
+    }
+    return candidate.toISOString();
   }
   return null;
 }

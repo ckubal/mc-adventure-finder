@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
 import { extractJsonLdEvent } from "../jsonLdEvent";
+import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://booksmith.com";
 const EVENTS_URL = `${BASE_URL}/events/list/upcoming-events`;
@@ -25,7 +26,7 @@ function parseDate(dateStr: string, timeStr: string): string {
       if (match[3] === "am" && hours === 12) hours = 0;
     }
   }
-  return new Date(year, month - 1, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month, day, hour: hours, minute: minutes, second: 0 });
 }
 
 const DETAIL_FETCH_TIMEOUT_MS = 8_000;
@@ -75,10 +76,10 @@ export const booksmithScraper: Scraper = {
       // Assume current year, adjust if date has passed
       const now = new Date();
       let year = now.getFullYear();
-      const eventDate = new Date(year, month - 1, day, 19, 0, 0);
+      const eventDate = dateFromZonedParts({ year, month, day, hour: 19, minute: 0, second: 0 });
       if (eventDate < now) year += 1;
       
-      const startAt = new Date(year, month - 1, day, 19, 0, 0).toISOString();
+      const startAt = isoFromZonedParts({ year, month, day, hour: 19, minute: 0, second: 0 });
       
       const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
       events.push({
