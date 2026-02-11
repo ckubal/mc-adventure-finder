@@ -122,8 +122,19 @@ export async function POST(req: NextRequest) {
     return { sourceId: scraper.id, count, errors };
   }
 
-  const runWithTimeout = (s: (typeof scrapers)[0]) =>
-    Promise.race([
+  /**
+   * WARNING: Avoid Promise.race timeouts for single-scraper runs.
+   * If we time out via Promise.race, the underlying scraper can continue running in the background
+   * (e.g. a Playwright browser stays alive), which can spike memory and restart the Render instance.
+   */
+  const runWithTimeout = (s: (typeof scrapers)[0]) => {
+    if (scrapers.length <= 1) {
+      return runScraper(s).catch((err) => {
+        console.warn(`[scrape] ${s.id} failed:`, err);
+        return { sourceId: s.id, count: 0, errors: [err instanceof Error ? err.message : String(err)] };
+      });
+    }
+    return Promise.race([
       runScraper(s),
       new Promise<{ sourceId: string; count: number; errors: string[] }>((_, reject) =>
         setTimeout(() => reject(new Error("Scraper timeout")), SCRAPER_TIMEOUT_MS)
@@ -132,6 +143,7 @@ export async function POST(req: NextRequest) {
       console.warn(`[scrape] ${s.id} timed out or failed:`, err);
       return { sourceId: s.id, count: 0, errors: [err instanceof Error ? err.message : String(err)] };
     });
+  };
 
   const settled = await Promise.allSettled(scrapers.map((s) => runWithTimeout(s)));
   const results = settled.map((p) =>
