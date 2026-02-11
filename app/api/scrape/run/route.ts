@@ -35,7 +35,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  const dryRun = new URL(req.url ?? "/", "http://localhost").searchParams.get("dryRun") === "true";
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const dryRun = url.searchParams.get("dryRun") === "true";
+  const onlySourceId = url.searchParams.get("sourceId")?.trim() || null;
+  const onlySourceIds = (url.searchParams.get("sourceIds") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (!dryRun && !adminDb) {
     return NextResponse.json(
@@ -43,9 +49,32 @@ export async function POST(req: NextRequest) {
       { status: 503 }
     );
   }
-  const scrapers = getScrapers();
+  const allScrapers = getScrapers();
+  const filterSet = new Set<string>([
+    ...(onlySourceId ? [onlySourceId] : []),
+    ...onlySourceIds,
+  ]);
+  const scrapers =
+    filterSet.size > 0
+      ? allScrapers.filter((s) => filterSet.has(s.id))
+      : allScrapers;
+
+  if (filterSet.size > 0 && scrapers.length === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        totalUpserted: 0,
+        results: [],
+        error: `No matching scrapers. Requested: ${Array.from(filterSet).join(", ")}. Available: ${allScrapers.map((s) => s.id).join(", ")}`,
+      },
+      { status: 404 }
+    );
+  }
+
   const col = adminDb ? adminDb.collection(COLLECTIONS.EVENTS) : null;
-  const SCRAPER_TIMEOUT_MS = 25_000;
+  // When running all scrapers at once, keep a short timeout so the endpoint returns.
+  // When running a single scraper (sourceId), allow more time for Playwright-heavy sources.
+  const SCRAPER_TIMEOUT_MS = scrapers.length <= 1 ? 55_000 : 25_000;
   const now = new Date();
   /** Only upsert events starting within this many days from now (default: next 3 months). */
   const SCRAPE_WINDOW_DAYS = getScrapeWindowDays();
