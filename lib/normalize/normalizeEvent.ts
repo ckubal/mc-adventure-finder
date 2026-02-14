@@ -1,18 +1,24 @@
 import { DEFAULT_TIMEZONE } from "@/types";
 import type { RawEvent, NormalizedEvent } from "@/lib/scrapers/types";
+import { parseIsoAssumingTimeZone } from "@/lib/scrapers/timezone";
 
 const LA_TZ = DEFAULT_TIMEZONE;
 
 function parseToDate(value: string | Date, tz: string): Date {
   if (value instanceof Date) return value;
-  const d = new Date(value);
+  const str = typeof value === "string" ? value.trim() : String(value);
+  // Offset-less ISO (e.g. "2026-02-13T20:00:00") is interpreted as LA, not UTC, so evening events don't show as noon.
+  const iso = parseIsoAssumingTimeZone(str, tz);
+  const d = iso ? new Date(iso) : new Date(str);
   if (Number.isNaN(d.getTime())) throw new Error(`Invalid date: ${value}`);
   return d;
 }
 
 function toEndDate(start: Date, end: string | Date | null | undefined): Date | null {
   if (end == null || end === "") return null;
-  const d = end instanceof Date ? end : new Date(end);
+  if (end instanceof Date) return Number.isNaN(end.getTime()) ? null : end;
+  const iso = parseIsoAssumingTimeZone(end.trim(), LA_TZ);
+  const d = new Date(iso ?? end);
   if (Number.isNaN(d.getTime())) return null;
   return d;
 }

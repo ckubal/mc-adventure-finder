@@ -1,3 +1,8 @@
+/**
+ * Event datetimes in this app use America/Los_Angeles when no timezone is given.
+ * Never interpret offset-less ISO strings (e.g. "2026-02-13T20:00:00") as UTC;
+ * use parseIsoAssumingTimeZone() so they are treated as Pacific.
+ */
 import { DEFAULT_TIMEZONE } from "@/types";
 
 export interface ZonedDateTimeParts {

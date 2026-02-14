@@ -1,4 +1,5 @@
 import { getScrapeCutoffDate } from "./scrapeWindow";
+import { parseIsoAssumingTimeZone } from "./timezone";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const UA =
@@ -58,8 +59,10 @@ async function fetchJson<T>(url: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promis
 
 function safeStartDate(ev: TicketmasterArtistEvent): Date | null {
   const raw = ev?.dates?.startDate;
-  if (!raw) return null;
-  const d = new Date(raw);
+  if (!raw || typeof raw !== "string") return null;
+  // Offset-less datetimes → America/Los_Angeles, not UTC.
+  const iso = parseIsoAssumingTimeZone(raw.trim());
+  const d = new Date(iso ?? raw);
   if (Number.isNaN(d.getTime())) return null;
   return d;
 }

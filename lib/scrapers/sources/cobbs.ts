@@ -83,7 +83,9 @@ function parseLiveNationEventsJson(jsonText: string): RawEvent[] | null {
         (typeof item.start_datetime_utc === "string" && item.start_datetime_utc) ||
         null;
       if (!dt) continue;
-      const d = new Date(dt);
+      // Offset-less datetimes → America/Los_Angeles, not UTC.
+      const iso = parseIsoAssumingTimeZone(dt.trim());
+      const d = new Date(iso ?? dt);
       if (Number.isNaN(d.getTime())) continue;
       const startAt = d.toISOString();
 

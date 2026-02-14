@@ -1,4 +1,5 @@
 import { getScrapeCutoffDate } from "./scrapeWindow";
+import { parseIsoAssumingTimeZone } from "./timezone";
 
 export interface LiveNationVenueEvent {
   tm_id?: string;
@@ -30,7 +31,9 @@ function parseEventStart(ev: LiveNationVenueEvent): Date | null {
     (typeof ev.start_datetime_utc === "string" && ev.start_datetime_utc) ||
     null;
   if (!s) return null;
-  const d = new Date(s);
+  // Offset-less datetimes are interpreted as America/Los_Angeles, not UTC.
+  const iso = parseIsoAssumingTimeZone(s.trim());
+  const d = new Date(iso ?? s);
   if (Number.isNaN(d.getTime())) return null;
   return d;
 }

@@ -139,22 +139,9 @@ export const makeOutRoomScraper: Scraper = {
               sections.push(content);
             }
 
-            // If we have only one section but content has multiple times (e.g. "8:00pm ... 9:30pm ..."), split by time to get multiple events
-            if (sections.length === 1) {
-              const fullText = content.text();
-              const timeSplitRegex = /\s+(?=\d{1,2}(?::\d{2})?\s*[ap]m\b)/gi;
-              const parts = fullText.split(timeSplitRegex).map((p) => p.trim()).filter((p) => p.length > 15);
-              if (parts.length > 1) {
-                sections.length = 0;
-                parts.forEach((part) => {
-                  const $fake = cheerio.load(`<div>${part.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`);
-                  sections.push($fake("div"));
-                });
-              }
-            }
-
-            // Parse each section as a potential event (each gets unique sourceEventId so we don't overwrite in Firestore)
-            sections.forEach((section, sectionIdx) => {
+            // Parse each section (split only by <hr>; do NOT split by time regex or we get one "event" per time mention and duplicate/wrong times)
+            const sectionResults: { title: string; startAt: string; description: string | null }[] = [];
+            sections.forEach((section) => {
               const text = section.text().trim();
               if (!text || text.length < 10) return;
               
@@ -247,34 +234,50 @@ export const makeOutRoomScraper: Scraper = {
                 description = descClean.slice(0, 300);
               }
               
-              const slug = title.slice(0, 50).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9\-_]/g, "") || String(sectionIdx);
-              const sourceEventId = `${startAt}_${slug}`;
+              sectionResults.push({ title, startAt, description });
+            });
+
+            // Merge sections with the same title into one event (earliest time); avoids 4x same event at 2am, 1:30pm, 8pm, 9:30pm
+            const normalized = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+            const byTitle = new Map<string, { title: string; startAt: string; description: string | null }>();
+            for (const r of sectionResults) {
+              const key = normalized(r.title);
+              const existing = byTitle.get(key);
+              if (!existing || r.startAt < existing.startAt) {
+                byTitle.set(key, r);
+              }
+            }
+
+            for (const r of byTitle.values()) {
+              const slug = r.title.slice(0, 50).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9\-_]/g, "") || "event";
+              const sourceEventId = slug; // stable per title so we don't create duplicate docs
               pageEvents.push({
-                title,
-                startAt,
+                title: r.title,
+                startAt: r.startAt,
                 sourceUrl: event.sourceUrl,
                 sourceEventId,
                 locationName: "Make-Out Room",
-                description,
+                description: r.description,
                 tags: ["concert"],
               });
+            }
+
+            if (pageEvents.length > 0) return pageEvents;
+            const fallbackStart = isoFromZonedParts({
+              year: dateInfo.year,
+              month: dateInfo.month + 1,
+              day: dateInfo.day,
+              hour: 20,
+              minute: 0,
+              second: 0,
             });
-            
-            return pageEvents.length > 0 ? pageEvents : [{
-              ...event,
-              startAt: isoFromZonedParts({
-                year: dateInfo.year,
-                month: dateInfo.month + 1,
-                day: dateInfo.day,
-                hour: 20,
-                minute: 0,
-                second: 0,
-              }),
-            }]; // Fallback to original event if no sub-events found
+            const fallbackSlug = event.title.slice(0, 50).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9\-_]/g, "") || "event";
+            return [{ ...event, startAt: fallbackStart, sourceEventId: fallbackSlug }];
           } catch {
-            // If detail page parsing fails, use the original event with default time
+            // If detail page parsing fails, use the original event with default time and stable id
             const dateInfo = (event.raw as { _detailDate?: { year: number; month: number; day: number } })?._detailDate;
             if (dateInfo) {
+              const slug = event.title.slice(0, 50).replace(/\s+/g, "-").replace(/[^a-zA-Z0-9\-_]/g, "") || "event";
               return [{
                 ...event,
                 startAt: isoFromZonedParts({
@@ -285,6 +288,7 @@ export const makeOutRoomScraper: Scraper = {
                   minute: 0,
                   second: 0,
                 }),
+                sourceEventId: slug,
               }];
             }
             return [];
