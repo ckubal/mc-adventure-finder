@@ -78,7 +78,17 @@ export function startDateFromJsonLdEvent(ld: JsonLdEvent | null): string | null 
   if (!ld?.startDate || typeof ld.startDate !== "string") return null;
   const s = ld.startDate.trim();
   if (!s) return null;
-  return s;
+  // If the JSON-LD timestamp omits an offset (common on venue sites),
+  // `new Date("YYYY-MM-DDTHH:mm")` will be interpreted in the server's TZ (Render=UTC),
+  // shifting SF evening events earlier by ~8 hours. Assume LA for this app.
+  try {
+    // Lazy import to avoid cycles if this module is used in environments without Intl.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { parseIsoAssumingTimeZone } = require("./timezone") as typeof import("./timezone");
+    return parseIsoAssumingTimeZone(s) ?? s;
+  } catch {
+    return s;
+  }
 }
 
 /**

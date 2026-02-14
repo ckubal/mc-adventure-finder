@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
 import type { Scraper, RawEvent } from "../types";
 import { fetchWithPlaywrightAutoScroll } from "../fetchPlaywright";
+import { dateFromZonedParts, isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
 
 const BASE_URL = "https://www.eventbrite.com";
 const EVENTS_URL = `${BASE_URL}/o/mannys-15114280512`;
@@ -9,10 +10,7 @@ const EVENTS_URL = `${BASE_URL}/o/mannys-15114280512`;
 const TARGET_DAYS_AHEAD = 60;
 
 function parseStartDate(iso: string): string | null {
-  if (!iso || typeof iso !== "string") return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return parseIsoAssumingTimeZone(iso);
 }
 
 type CheerioAPI = ReturnType<typeof cheerio.load>;
@@ -40,16 +38,39 @@ function parseEventbriteCardDateTime(text: string, now = new Date()): string | n
     if (ampm === "pm" && hours < 12) hours += 12;
     if (ampm === "am" && hours === 12) hours = 0;
 
-    // Find the next occurrence of the weekday (including today if still upcoming).
-    const candidate = new Date(now);
-    candidate.setSeconds(0, 0);
-    candidate.setHours(hours, minutes, 0, 0);
-    const dow = candidate.getDay();
-    let add = (target - dow + 7) % 7;
-    if (add === 0 && candidate <= now) add = 7;
-    candidate.setDate(candidate.getDate() + add);
-    if (Number.isNaN(candidate.getTime())) return null;
-    return candidate.toISOString();
+    // Find the next occurrence of the weekday in America/Los_Angeles.
+    // Render runs in UTC; avoid Date#setHours which uses server TZ.
+    const ymdFormatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles",
+      weekday: "short",
+    });
+    const todayYmd = ymdFormatter.format(now); // YYYY-MM-DD in LA
+    const [y0, m0, d0] = todayYmd.split("-").map(Number);
+    if (!y0 || !m0 || !d0) return null;
+
+    const baseMidnightUtc = dateFromZonedParts({ year: y0, month: m0, day: d0, hour: 0, minute: 0, second: 0 });
+    const mapW: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+    for (let i = 0; i <= 7; i++) {
+      const dayUtc = new Date(baseMidnightUtc.getTime() + i * 86_400_000);
+      const dayYmd = ymdFormatter.format(dayUtc);
+      const [yy, mm, dd] = dayYmd.split("-").map(Number);
+      if (!yy || !mm || !dd) continue;
+      const wdShort = weekdayFormatter.format(dayUtc);
+      const wdIdx = mapW[wdShort];
+      if (wdIdx !== target) continue;
+
+      const iso = isoFromZonedParts({ year: yy, month: mm, day: dd, hour: hours, minute: minutes, second: 0 });
+      const dt = new Date(iso);
+      if (dt > now) return iso;
+    }
+    return null;
   }
 
   const monthName = m[2].toLowerCase().slice(0, 3);
@@ -67,11 +88,11 @@ function parseEventbriteCardDateTime(text: string, now = new Date()): string | n
   if (ampm === "am" && hours === 12) hours = 0;
 
   let year = now.getFullYear();
-  let d = new Date(year, month, day, hours, minutes, 0);
+  let d = dateFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
   // If this date is far in the past, assume it's next year (year rollover).
   if (d.getTime() < now.getTime() - 2 * 86_400_000) {
     year += 1;
-    d = new Date(year, month, day, hours, minutes, 0);
+    d = dateFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
   }
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();

@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml } from "../fetchHtml";
+import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
 
 const CALENDAR_URL = "https://1015.com/";
 const VENUE_NAME = "1015 Folsom";
@@ -25,7 +26,7 @@ function parseDateFromHeading(dateText: string): { year: number; month: number; 
   if (!day || day > 31) return null;
   const now = new Date();
   let year = now.getFullYear();
-  const d = new Date(year, month, day);
+  const d = dateFromZonedParts({ year, month: month + 1, day, hour: 0, minute: 0, second: 0 });
   if (d < now) year += 1;
   return { year, month, day };
 }
@@ -80,7 +81,7 @@ export const folsom1015Scraper: Scraper = {
       const sourceUrl = ticketUrl ?? CALENDAR_URL;
 
       const { year, month, day } = parsed;
-      const startAt = new Date(year, month, day, 21, 0, 0).toISOString();
+      const startAt = isoFromZonedParts({ year, month: month + 1, day, hour: 21, minute: 0, second: 0 });
 
       events.push({
         title,

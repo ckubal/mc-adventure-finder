@@ -1,20 +1,24 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml } from "../fetchHtml";
+import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://roxie.com";
 const CALENDAR_URL = `${BASE_URL}/calendar/`;
 
-function parseTime(timeStr: string, baseDate: Date): Date {
+type YMD = { year: number; month: number; day: number };
+
+function parseTimeToIso(timeStr: string, ymd: YMD): string {
   const m = timeStr.trim().toLowerCase().match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-  if (!m) return baseDate;
-  let hours = parseInt(m[1], 10);
-  const minutes = m[2] ? parseInt(m[2], 10) : 0;
-  if (m[3] === "pm" && hours < 12) hours += 12;
-  if (m[3] === "am" && hours === 12) hours = 0;
-  const d = new Date(baseDate);
-  d.setHours(hours, minutes, 0, 0);
-  return d;
+  let hours = 19;
+  let minutes = 0;
+  if (m) {
+    hours = parseInt(m[1], 10);
+    minutes = m[2] ? parseInt(m[2], 10) : 0;
+    if (m[3] === "pm" && hours < 12) hours += 12;
+    if (m[3] === "am" && hours === 12) hours = 0;
+  }
+  return isoFromZonedParts({ year: ymd.year, month: ymd.month, day: ymd.day, hour: hours, minute: minutes, second: 0 });
 }
 
 export const roxieScraper: Scraper = {
@@ -50,34 +54,31 @@ export const roxieScraper: Scraper = {
         July: 6, August: 7, September: 8, October: 9, November: 10, December: 11,
         Jan: 0, Feb: 1, Mar: 2, Apr: 3, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
       };
-      let baseDate: Date;
+      let ymd: YMD;
       if (dateMatch) {
         const month = monthNames[dateMatch[1]] ?? 0;
-        baseDate = new Date(
-          parseInt(dateMatch[3], 10),
-          month,
-          parseInt(dateMatch[2], 10),
-          0,
-          0,
-          0
-        );
+        ymd = {
+          year: parseInt(dateMatch[3], 10),
+          month: month + 1,
+          day: parseInt(dateMatch[2], 10),
+        };
       } else {
         const h2 = $a.closest("table").prevAll("h2").first().text();
         const monthYearMatch = h2.match(/([A-Za-z]+)\s+(\d{4})/);
         if (monthYearMatch) {
           const month = monthNames[monthYearMatch[1]] ?? new Date().getMonth();
-          baseDate = new Date(parseInt(monthYearMatch[2], 10), month, 1, 0, 0, 0);
+          ymd = { year: parseInt(monthYearMatch[2], 10), month: month + 1, day: 1 };
         } else {
-          baseDate = new Date();
+          const now = new Date();
+          ymd = { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
         }
       }
 
       const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
       for (const timeStr of times) {
-        const startAt = parseTime(timeStr, baseDate);
         events.push({
           title,
-          startAt: startAt.toISOString(),
+          startAt: parseTimeToIso(timeStr, ymd),
           sourceUrl: fullUrl,
           locationName: "Roxie Theater",
           locationAddress: "3125 16th Street, San Francisco",

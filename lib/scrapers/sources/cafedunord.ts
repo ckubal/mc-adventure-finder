@@ -7,6 +7,7 @@ import {
   startDateFromJsonLdEvent,
   extractFallbackTitleFromJsonLd,
 } from "../jsonLdEvent";
+import { dateFromZonedParts, isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
 
 const BASE_URL = "https://cafedunord.com";
 const CALENDAR_URL = `${BASE_URL}/calendar/`;
@@ -38,7 +39,7 @@ function parseTwDate(dateStr: string, timeStr: string): string {
   const day = parseInt(dotMatch[2], 10);
   const now = new Date();
   let year = now.getFullYear();
-  const d = new Date(year, month, day);
+  const d = dateFromZonedParts({ year, month: month + 1, day, hour: 0, minute: 0, second: 0 });
   if (d < now) year += 1;
   let hours = 20;
   let minutes = 0;
@@ -52,14 +53,11 @@ function parseTwDate(dateStr: string, timeStr: string): string {
       if (m[3] === "am" && hours === 12) hours = 0;
     }
   }
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 function parseStartDate(iso: string): string | null {
-  if (!iso || typeof iso !== "string") return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return parseIsoAssumingTimeZone(iso);
 }
 
 export const cafeDuNordScraper: Scraper = {

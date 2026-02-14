@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml } from "../fetchHtml";
+import { isoFromZonedParts } from "../timezone";
 
 const CALENDAR_URL = "https://www.bottomofthehill.com/calendar.html";
 const BASE_URL = "https://www.bottomofthehill.com";
@@ -39,7 +40,7 @@ function parseTime(text: string): { hours: number; minutes: number } {
 }
 
 function toISO(year: number, month: number, day: number, hours: number, minutes: number): string {
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 export const bottomOfTheHillScraper: Scraper = {

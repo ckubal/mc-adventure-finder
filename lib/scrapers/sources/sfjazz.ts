@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml } from "../fetchHtml";
+import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://www.sfjazz.org";
 const HOMEPAGE_URL = `${BASE_URL}/`;
@@ -52,9 +53,9 @@ function parseDateLine(line: string): string | null {
     const day = parseInt(singleMatch[2], 10);
     if (day < 1 || day > 31) return null;
     let year = currentYear;
-    const d = new Date(year, month, day, hours, minutes, 0);
+    const d = dateFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
     if (d < now) year = currentYear + 1;
-    return new Date(year, month, day, hours, minutes, 0).toISOString();
+    return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
   }
 
   // "WED-SUN, JAN 28-FEB 1" or "THU-FRI, DEC 18-19" -> use first day
@@ -65,9 +66,9 @@ function parseDateLine(line: string): string | null {
     const day = parseInt(rangeMatch[2], 10);
     if (day < 1 || day > 31) return null;
     let year = currentYear;
-    const d = new Date(year, month, day, 19, 30, 0);
+    const d = dateFromZonedParts({ year, month: month + 1, day, hour: 19, minute: 30, second: 0 });
     if (d < now) year = currentYear + 1;
-    return new Date(year, month, day, 19, 30, 0).toISOString();
+    return isoFromZonedParts({ year, month: month + 1, day, hour: 19, minute: 30, second: 0 });
   }
 
   // "MAY 7" or "THU, MAY 7" (no day number in month abbrev)
@@ -78,9 +79,9 @@ function parseDateLine(line: string): string | null {
     const day = parseInt(shortMatch[2], 10);
     if (day < 1 || day > 31) return null;
     let year = currentYear;
-    const d = new Date(year, month, day, hours, minutes, 0);
+    const d = dateFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
     if (d < now) year = currentYear + 1;
-    return new Date(year, month, day, hours, minutes, 0).toISOString();
+    return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
   }
 
   return null;

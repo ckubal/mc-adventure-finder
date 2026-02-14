@@ -3,6 +3,7 @@ import type { Scraper, RawEvent } from "../types";
 import { titleFromJsonLdEvent, startDateFromJsonLdEvent } from "../jsonLdEvent";
 import type { LiveNationVenueEvent } from "../liveNationVenue";
 import { fetchLiveNationVenueEventsJson } from "../liveNationVenue";
+import { isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
 
 const BASE_URL = "https://www.punchlinecomedyclub.com";
 const SHOWS_URL = `${BASE_URL}/shows`;
@@ -43,14 +44,11 @@ function parseDate(dateStr: string, timeStr: string): string {
       if (m[3] === "am" && hours === 12) hours = 0;
     }
   }
-  return new Date(year, month, day, hours, minutes, 0).toISOString();
+  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
 }
 
 function parseStartDate(iso: string): string | null {
-  if (!iso || typeof iso !== "string") return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
+  return parseIsoAssumingTimeZone(iso);
 }
 
 function addressFromVenue(ev: LiveNationVenueEvent): string | null {
