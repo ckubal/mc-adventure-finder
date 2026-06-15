@@ -13,6 +13,7 @@ import {
   type AgendaGroupKey,
 } from "@/lib/agenda/groupEvents";
 import { VENUE_CATEGORIES } from "@/lib/venue-categories";
+import { SCRAPE_BATCHES } from "@/lib/scrapers/batches";
 import { EventCard } from "./EventCard";
 
 const ORDER: AgendaGroupKey[] = ["today", "this_week", "later"];
@@ -211,49 +212,56 @@ export function AgendaList() {
       setScrapeElapsed((n) => n + 1);
     }, 1000);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90_000); // 90s max
-    const url = dryRun ? `${basePath}/api/scrape/run?dryRun=true` : `${basePath}/api/scrape/run`;
+    const timeoutId = setTimeout(() => controller.abort(), 600_000);
+    let totalUpserted = 0;
+    const allErrors: string[] = [];
+
     try {
-      const scrapeRes = await fetch(url, {
-        method: "POST",
-        signal: controller.signal,
-      });
+      for (let batchIndex = 0; batchIndex < SCRAPE_BATCHES.length; batchIndex++) {
+        setScrapeMessage(`Scraping batch ${batchIndex + 1}/${SCRAPE_BATCHES.length}…`);
+        const params = new URLSearchParams({ batch: String(batchIndex) });
+        if (dryRun) params.set("dryRun", "true");
+        const url = `${basePath}/api/scrape/run?${params.toString()}`;
+        const scrapeRes = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+        });
+        const scrapeData = await scrapeRes.json().catch(() => ({}));
+        if (!scrapeRes.ok) {
+          const err = scrapeData?.error ?? `HTTP ${scrapeRes.status}`;
+          setScrapeMessage(`Scrape failed on batch ${batchIndex + 1}: ${err}`);
+          await fetchEvents();
+          return;
+        }
+        totalUpserted += scrapeData?.totalUpserted ?? 0;
+        const results = scrapeData?.results ?? [];
+        allErrors.push(
+          ...results.flatMap((r: { sourceId: string; errors: string[] }) =>
+            (r.errors ?? []).map((e: string) => `${r.sourceId}: ${e}`)
+          )
+        );
+      }
+
       clearTimeout(timeoutId);
       if (scrapeIntervalRef.current) {
         clearInterval(scrapeIntervalRef.current);
         scrapeIntervalRef.current = null;
       }
-      const scrapeData = await scrapeRes.json().catch(() => ({}));
-      if (!scrapeRes.ok) {
-        const err =
-          scrapeData?.error ?? `HTTP ${scrapeRes.status}`;
-        setScrapeMessage(`Scrape failed: ${err}`);
-        await fetchEvents();
-        return;
-      }
-      const total = scrapeData?.totalUpserted ?? 0;
-      const results = scrapeData?.results ?? [];
-      const errors = results.flatMap((r: { sourceId: string; errors: string[] }) =>
-        (r.errors ?? []).map((e: string) => `${r.sourceId}: ${e}`)
-      );
+
       if (dryRun) {
         setScrapeMessage(
-          total > 0
-            ? `Test run: would save ${total} events (nothing written to Firebase).`
-            : errors.length > 0
-              ? `Test run: 0 events. First error: ${errors[0].slice(0, 60)}…`
+          totalUpserted > 0
+            ? `Test run: would save ${totalUpserted} events (nothing written to Firebase).`
+            : allErrors.length > 0
+              ? `Test run: 0 events. First error: ${allErrors[0].slice(0, 60)}…`
               : "Test run: 0 events. Check server logs for details."
         );
-      } else if (total > 0) {
-        setScrapeMessage(`Scraped ${total} events.`);
-      } else if (errors.length > 0) {
-        setScrapeMessage(
-          `Scraped 0 events. First error: ${errors[0].slice(0, 80)}…`
-        );
+      } else if (totalUpserted > 0) {
+        setScrapeMessage(`Scraped ${totalUpserted} events across ${SCRAPE_BATCHES.length} batches.`);
+      } else if (allErrors.length > 0) {
+        setScrapeMessage(`Scraped 0 events. First error: ${allErrors[0].slice(0, 80)}…`);
       } else {
-        setScrapeMessage(
-          "Scrape finished with 0 events. Check server logs (terminal) for details."
-        );
+        setScrapeMessage("Scrape finished with 0 events. Check server logs for details.");
       }
       if (!dryRun) await fetchEvents();
     } catch (e) {
@@ -264,8 +272,10 @@ export function AgendaList() {
       }
       const isTimeout = e instanceof Error && e.name === "AbortError";
       const msg = isTimeout
-        ? "Scrape timed out after 90 seconds. Some sources may still have run—check the list."
-        : e instanceof Error ? e.message : String(e);
+        ? "Scrape timed out. Some batches may have completed—check the list."
+        : e instanceof Error
+          ? e.message
+          : String(e);
       setScrapeMessage(`Scrape failed: ${msg}`);
       if (!isTimeout) console.error(e);
       await fetchEvents();

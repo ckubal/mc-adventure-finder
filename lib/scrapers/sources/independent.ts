@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
+import { fetchWithPlaywrightWait } from "../fetchPlaywright";
 import {
   extractJsonLdEvent,
   titleFromJsonLdEvent,
@@ -20,7 +21,9 @@ function parseDate(dateStr: string, timeStr: string): string {
   const timeTrimmed = timeStr.trim().toLowerCase().replace(/^show:\s*/i, "");
   if (!trimmed) return "";
   const slashMatch = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  const wordMatch = trimmed.match(/([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})/);
+  const wordMatch =
+    trimmed.match(/([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})/) ||
+    trimmed.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+([A-Za-z]+)\s+(\d{1,2})/i);
   let month: number;
   let day: number;
   let year: number;
@@ -34,7 +37,12 @@ function parseDate(dateStr: string, timeStr: string): string {
     };
     month = months[wordMatch[1].slice(0, 3)] ?? 0;
     day = parseInt(wordMatch[2], 10);
-    year = parseInt(wordMatch[3], 10);
+    year = wordMatch[3] ? parseInt(wordMatch[3], 10) : new Date().getFullYear();
+    if (!wordMatch[3]) {
+      const now = new Date();
+      const d = new Date(year, month, day);
+      if (d < now) year += 1;
+    }
   } else {
     return "";
   }
@@ -63,7 +71,11 @@ export const independentScraper: Scraper = {
   name: "The Independent",
 
   async fetch() {
-    return fetchHtml(CALENDAR_URL);
+    return fetchWithPlaywrightWait(
+      CALENDAR_URL,
+      'a[href*="tm-event"], .tw-cal-event, .tw-calendar-event-content',
+      45_000
+    );
   },
 
   async parse(html: string): Promise<RawEvent[]> {
@@ -73,17 +85,19 @@ export const independentScraper: Scraper = {
     type CalendarRow = { href: string; fullUrl: string; dateStr: string; timeStr: string; linkText: string; slugTitle: string };
     const rows: CalendarRow[] = [];
 
-    $(".tw-cal-event").each((_, el) => {
-      const $event = $(el);
-      const $nameLink = $event.find(".tw-name a[href*='tm-event']").first();
-      const href = $nameLink.attr("href");
-      if (!href) return;
-
-      const dateStr = $event.find(".tw-event-date").first().text().trim();
+    const pushRow = (
+      $event: ReturnType<typeof $>,
+      $nameLink: ReturnType<typeof $>,
+      href: string
+    ) => {
+      const dateStr =
+        $event.find(".tw-event-date").first().text().trim() ||
+        $event.find(".tw-calendar-event-date").first().text().trim() ||
+        $event.closest(".tw-cal-event").find(".tw-event-date").first().text().trim();
       if (!dateStr) return;
 
       const timeStr =
-        $event.find(".tw-calendar-event-time").first().text().trim() ||
+        $event.find(".tw-calendar-event-time, .tw-event-time").first().text().trim() ||
         $event.text().match(/Show:\s*(\d{1,2}(?::\d{2})?\s*[ap]m)/i)?.[0] ||
         "8:00 PM";
 
@@ -97,7 +111,33 @@ export const independentScraper: Scraper = {
           ?.replace(/-/g, " ") ?? "Show at The Independent";
 
       rows.push({ href, fullUrl, dateStr, timeStr, linkText, slugTitle });
+    };
+
+    $(".tw-cal-event").each((_, el) => {
+      const $event = $(el);
+      const $nameLink = $event.find(".tw-name a[href*='tm-event'], .tw-calendar-event-title a[href*='tm-event']").first();
+      const href = $nameLink.attr("href");
+      if (!href) return;
+      pushRow($event, $nameLink, href);
     });
+
+    $(".tw-calendar-event-content").each((_, el) => {
+      const $event = $(el);
+      const $nameLink = $event.find("a[href*='tm-event']").first();
+      const href = $nameLink.attr("href");
+      if (!href) return;
+      pushRow($event, $nameLink, href);
+    });
+
+    if (rows.length === 0) {
+      $('a[href*="tm-event"]').each((_, el) => {
+        const $nameLink = $(el);
+        const href = $nameLink.attr("href");
+        if (!href) return;
+        const $event = $nameLink.closest(".tw-cal-event, .tw-calendar-event-content, li, article, div");
+        pushRow($event, $nameLink, href);
+      });
+    }
 
     const calendarStartAt = (row: CalendarRow) => parseDate(row.dateStr, row.timeStr);
 

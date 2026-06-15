@@ -1,7 +1,6 @@
 /**
  * Venue categories for quick-filtering above the source list.
  * Each category maps to source IDs (must match scraper ids in lib/scrapers/sources).
- * Covers all registered sources: Music, Books, Comedy, Culture.
  */
 export const VENUE_CATEGORIES: { id: string; label: string; sourceIds: string[] }[] = [
   {
@@ -16,7 +15,13 @@ export const VENUE_CATEGORIES: { id: string; label: string; sourceIds: string[] 
       "makeoutroom",
       "brickandmortar",
       "1015folsom",
+      "castro",
     ],
+  },
+  {
+    id: "film",
+    label: "Film",
+    sourceIds: ["roxie"],
   },
   {
     id: "sports",

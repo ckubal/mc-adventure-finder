@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchHtml } from "../fetchHtml";
+import { fetchWithPlaywrightWait } from "../fetchPlaywright";
 import { isoFromZonedParts } from "../timezone";
 
 const CALENDAR_URL = "https://www.bottomofthehill.com/calendar.html";
@@ -48,7 +48,7 @@ export const bottomOfTheHillScraper: Scraper = {
   name: "Bottom of the Hill",
 
   async fetch() {
-    return fetchHtml(CALENDAR_URL);
+    return fetchWithPlaywrightWait(CALENDAR_URL, "td .band", 45_000);
   },
 
   parse(html: string): RawEvent[] {

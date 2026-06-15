@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchHtml } from "../fetchHtml";
+import { fetchWithPlaywrightWait } from "../fetchPlaywright";
 import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://www.sfjazz.org";
@@ -92,7 +92,11 @@ export const sfjazzScraper: Scraper = {
   name: "SFJazz",
 
   async fetch() {
-    return fetchHtml(HOMEPAGE_URL);
+    return fetchWithPlaywrightWait(
+      HOMEPAGE_URL,
+      'a[href*="sfjazz.org/link/"][href*=".aspx"]',
+      45_000
+    );
   },
 
   parse(html: string): RawEvent[] {

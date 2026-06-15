@@ -70,6 +70,8 @@ export async function fetchLiveNationVenueEventsJson(opts: {
       const apiUrl = `https://content.livenationapi.com/v1/venues/${opts.venueId}/events?offset=${offset}&limit=${pageSize}`;
       const res = await page.request.get(apiUrl);
       if (!res.ok()) {
+        // Pagination often 403s after the first page; keep events already fetched.
+        if (all.length > 0) break;
         throw new Error(`Live Nation API HTTP ${res.status()} for ${apiUrl}`);
       }
 

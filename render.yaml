@@ -19,3 +19,120 @@ services:
       # NEXT_PUBLIC_FIREBASE_API_KEY, NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, NEXT_PUBLIC_FIREBASE_PROJECT_ID, etc.
       # FIREBASE_PROJECT_ID, FIREBASE_SERVICE_ACCOUNT_KEY (or FIREBASE_SERVICE_ACCOUNT_PATH)
       # AUTH_SECRET, AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET (optional)
+      # SCRAPE_SECRET — random string; required for /api/cron/scrape
+      # APP_URL — e.g. https://mc-adventure-finder.onrender.com (for cron jobs)
+
+  # Staggered cron jobs: one scrape batch per invocation (fits 60s route limit).
+  # Full cycle every 2 hours across batches 0–5.
+
+  - type: cron
+    name: mc-adventure-scrape-batch-0
+    runtime: node
+    region: oregon
+    schedule: "0 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=0"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-1
+    runtime: node
+    region: oregon
+    schedule: "10 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=1"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-2
+    runtime: node
+    region: oregon
+    schedule: "20 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=2"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-3
+    runtime: node
+    region: oregon
+    schedule: "30 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=3"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-4
+    runtime: node
+    region: oregon
+    schedule: "40 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=4"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-5
+    runtime: node
+    region: oregon
+    schedule: "50 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=5"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-retry
+    runtime: node
+    region: oregon
+    schedule: "5 */6 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=retry"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false

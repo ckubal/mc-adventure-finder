@@ -17,6 +17,25 @@ export async function fetchWithPlaywright(url: string): Promise<string> {
   }
 }
 
+/** Fetch rendered HTML and wait for a selector (e.g. JS-loaded calendars). */
+export async function fetchWithPlaywrightWait(
+  url: string,
+  selector: string,
+  timeoutMs = 45_000
+): Promise<string> {
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await page.waitForSelector(selector, { timeout: timeoutMs });
+    return await page.content();
+  } finally {
+    await browser.close();
+  }
+}
+
 /**
  * Fetch rendered HTML and attempt to auto-scroll to load more content.
  * Useful for infinite-scroll event listings (e.g. Eventbrite organizer pages).

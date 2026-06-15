@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchHtml } from "../fetchHtml";
+import { fetchWithPlaywrightWait } from "../fetchPlaywright";
 import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
 
 const CALENDAR_URL = "https://1015.com/";
@@ -52,7 +52,7 @@ export const folsom1015Scraper: Scraper = {
   name: "1015 Folsom",
 
   async fetch() {
-    return fetchHtml(CALENDAR_URL);
+    return fetchWithPlaywrightWait(CALENDAR_URL, ".wpb_text_column h4", 45_000);
   },
 
   parse(html: string): RawEvent[] {
