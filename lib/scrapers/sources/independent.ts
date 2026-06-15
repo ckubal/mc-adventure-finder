@@ -20,6 +20,7 @@ function parseDate(dateStr: string, timeStr: string): string {
   const trimmed = dateStr.trim();
   const timeTrimmed = timeStr.trim().toLowerCase().replace(/^show:\s*/i, "");
   if (!trimmed) return "";
+  const isoDayMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const slashMatch = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   const dotMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})$/);
   const wordMatch =
@@ -28,7 +29,11 @@ function parseDate(dateStr: string, timeStr: string): string {
   let month: number;
   let day: number;
   let year: number;
-  if (slashMatch) {
+  if (isoDayMatch) {
+    year = parseInt(isoDayMatch[1], 10);
+    month = parseInt(isoDayMatch[2], 10) - 1;
+    day = parseInt(isoDayMatch[3], 10);
+  } else if (slashMatch) {
     month = parseInt(slashMatch[1], 10) - 1;
     day = parseInt(slashMatch[2], 10);
     year = parseInt(slashMatch[3], 10);
@@ -92,6 +97,30 @@ export const independentScraper: Scraper = {
 
     type CalendarRow = { href: string; fullUrl: string; dateStr: string; timeStr: string; linkText: string; slugTitle: string };
     const rows: CalendarRow[] = [];
+    const seenUrls = new Set<string>();
+
+    // FullCalendar grid (common on headless Render): aria-label="Choker|2026-06-17|8:00 PM"
+    $(".fc-event[aria-label], .fc-daygrid-event[aria-label]").each((_, el) => {
+      const $ev = $(el);
+      const label = ($ev.attr("aria-label") || $ev.attr("title") || "").trim();
+      const m = label.match(/^(.+?)\|(\d{4}-\d{2}-\d{2})\|(.+)$/);
+      if (!m) return;
+      const [, title, isoDate, timePart] = m;
+      const $link = $ev.find('a[href*="tm-event"]').first();
+      const href = $link.attr("href");
+      if (!href) return;
+      const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
+      if (seenUrls.has(fullUrl)) return;
+      seenUrls.add(fullUrl);
+      rows.push({
+        href,
+        fullUrl,
+        dateStr: isoDate,
+        timeStr: timePart,
+        linkText: title.trim(),
+        slugTitle: title.trim(),
+      });
+    });
 
     const pushRow = (
       $event: ReturnType<typeof $>,
@@ -110,6 +139,8 @@ export const independentScraper: Scraper = {
         "8:00 PM";
 
       const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
+      if (seenUrls.has(fullUrl)) return;
+
       const linkText = ($nameLink.attr("title") || $nameLink.text()).trim();
       const slugTitle =
         href
@@ -119,6 +150,7 @@ export const independentScraper: Scraper = {
           ?.replace(/-/g, " ") ?? "Show at The Independent";
 
       rows.push({ href, fullUrl, dateStr, timeStr, linkText, slugTitle });
+      seenUrls.add(fullUrl);
     };
 
     $(".tw-cal-event").each((_, el) => {
@@ -142,6 +174,8 @@ export const independentScraper: Scraper = {
         const $nameLink = $(el);
         const href = $nameLink.attr("href");
         if (!href) return;
+        const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
+        if (seenUrls.has(fullUrl)) return;
         const $event = $nameLink.closest(".tw-cal-event, .tw-calendar-event-content, li, article, div");
         pushRow($event, $nameLink, href);
       });
