@@ -16,8 +16,6 @@ export const SCRAPE_BATCHES: string[][] = [
   ["bottomofthehill"],
   ["1015folsom"],
   ["sfjazz"],
-  // Roxie emits many showtime rows; keep isolated so it doesn't block fast sources
-  ["roxie"],
 ];
 
 export const SCRAPE_BATCH_COUNT = SCRAPE_BATCHES.length;

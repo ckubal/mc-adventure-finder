@@ -19,11 +19,6 @@ export const VENUE_CATEGORIES: { id: string; label: string; sourceIds: string[] 
     ],
   },
   {
-    id: "film",
-    label: "Film",
-    sourceIds: ["roxie"],
-  },
-  {
     id: "sports",
     label: "Sports",
     sourceIds: ["warriors", "giants"],

@@ -23,7 +23,7 @@ services:
       # APP_URL — e.g. https://mc-adventure-finder.onrender.com (for cron jobs)
 
   # Staggered cron jobs: one scrape batch per invocation (fits 60s route limit).
-  # Full cycle every 2 hours across batches 0–9.
+  # Full cycle every 2 hours across batches 0–8.
 
   - type: cron
     name: mc-adventure-scrape-batch-0
@@ -163,22 +163,6 @@ services:
       curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=8"
-    envVars:
-      - key: APP_URL
-        sync: false
-      - key: SCRAPE_SECRET
-        sync: false
-
-  - type: cron
-    name: mc-adventure-scrape-batch-9
-    runtime: node
-    region: oregon
-    schedule: "54 */2 * * *"
-    buildCommand: echo ok
-    startCommand: >-
-      curl -fsS --max-time 180 -X GET
-      -H "Authorization: Bearer $SCRAPE_SECRET"
-      "$APP_URL/api/cron/scrape?batch=9"
     envVars:
       - key: APP_URL
         sync: false
