@@ -8,7 +8,7 @@ import {
   startDateFromJsonLdEvent,
   extractFallbackTitleFromJsonLd,
 } from "../jsonLdEvent";
-import { isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
+import { dateFromZonedParts, isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
 
 const BASE_URL = "https://www.theindependentsf.com";
 const CALENDAR_URL = `${BASE_URL}/calendar/`;
@@ -21,6 +21,7 @@ function parseDate(dateStr: string, timeStr: string): string {
   const timeTrimmed = timeStr.trim().toLowerCase().replace(/^show:\s*/i, "");
   if (!trimmed) return "";
   const slashMatch = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  const dotMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})$/);
   const wordMatch =
     trimmed.match(/([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})/) ||
     trimmed.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+([A-Za-z]+)\s+(\d{1,2})/i);
@@ -31,6 +32,13 @@ function parseDate(dateStr: string, timeStr: string): string {
     month = parseInt(slashMatch[1], 10) - 1;
     day = parseInt(slashMatch[2], 10);
     year = parseInt(slashMatch[3], 10);
+  } else if (dotMatch) {
+    month = parseInt(dotMatch[1], 10) - 1;
+    day = parseInt(dotMatch[2], 10);
+    const now = new Date();
+    year = now.getFullYear();
+    const d = dateFromZonedParts({ year, month: month + 1, day, hour: 0, minute: 0, second: 0 });
+    if (d < now) year += 1;
   } else if (wordMatch) {
     const months: Record<string, number> = {
       Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,

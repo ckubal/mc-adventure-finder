@@ -3,26 +3,21 @@
  * Cron runs one batch per job; the UI loops all batches on refresh.
  */
 export const SCRAPE_BATCHES: string[][] = [
-  // Fast HTTP / API sources (~15s total)
-  [
-    "funcheap",
-    "envelop",
-    "makeoutroom",
-    "brickandmortar",
-    "booksmith",
-    "giants",
-    "warriors",
-    "roxie",
-  ],
-  // Medium HTTP + detail enrichment (~45s total)
+  // Fast HTTP / API sources
+  ["funcheap", "envelop", "makeoutroom", "brickandmortar", "booksmith", "giants", "warriors"],
+  // Medium HTTP + detail enrichment
   ["rickshaw", "cafedunord", "grayarea", "greenapple"],
-  // Playwright venue calendars
-  ["castro", "independent"],
-  // Heavy Playwright (one slow source per batch)
+  // Playwright venue calendars (one per batch — detail fetches are slow)
+  ["castro"],
+  ["independent"],
   ["mannys"],
   ["cobbs", "punchline"],
-  // Blocked or slow static sites — Playwright fetch
-  ["bottomofthehill", "1015folsom", "sfjazz"],
+  // Playwright fetches for bot-blocked sites (one per batch)
+  ["bottomofthehill"],
+  ["1015folsom"],
+  ["sfjazz"],
+  // Roxie emits many showtime rows; keep isolated so it doesn't block fast sources
+  ["roxie"],
 ];
 
 export const SCRAPE_BATCH_COUNT = SCRAPE_BATCHES.length;

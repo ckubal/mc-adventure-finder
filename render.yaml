@@ -23,7 +23,7 @@ services:
       # APP_URL — e.g. https://mc-adventure-finder.onrender.com (for cron jobs)
 
   # Staggered cron jobs: one scrape batch per invocation (fits 60s route limit).
-  # Full cycle every 2 hours across batches 0–5.
+  # Full cycle every 2 hours across batches 0–9.
 
   - type: cron
     name: mc-adventure-scrape-batch-0
@@ -45,7 +45,7 @@ services:
     name: mc-adventure-scrape-batch-1
     runtime: node
     region: oregon
-    schedule: "10 */2 * * *"
+    schedule: "6 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
       curl -fsS --max-time 180 -X GET
@@ -61,7 +61,7 @@ services:
     name: mc-adventure-scrape-batch-2
     runtime: node
     region: oregon
-    schedule: "20 */2 * * *"
+    schedule: "12 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
       curl -fsS --max-time 180 -X GET
@@ -77,7 +77,7 @@ services:
     name: mc-adventure-scrape-batch-3
     runtime: node
     region: oregon
-    schedule: "30 */2 * * *"
+    schedule: "18 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
       curl -fsS --max-time 180 -X GET
@@ -93,7 +93,7 @@ services:
     name: mc-adventure-scrape-batch-4
     runtime: node
     region: oregon
-    schedule: "40 */2 * * *"
+    schedule: "24 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
       curl -fsS --max-time 180 -X GET
@@ -109,12 +109,76 @@ services:
     name: mc-adventure-scrape-batch-5
     runtime: node
     region: oregon
-    schedule: "50 */2 * * *"
+    schedule: "30 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
       curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=5"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-6
+    runtime: node
+    region: oregon
+    schedule: "36 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS --max-time 180 -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=6"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-7
+    runtime: node
+    region: oregon
+    schedule: "42 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS --max-time 180 -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=7"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-8
+    runtime: node
+    region: oregon
+    schedule: "48 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS --max-time 180 -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=8"
+    envVars:
+      - key: APP_URL
+        sync: false
+      - key: SCRAPE_SECRET
+        sync: false
+
+  - type: cron
+    name: mc-adventure-scrape-batch-9
+    runtime: node
+    region: oregon
+    schedule: "54 */2 * * *"
+    buildCommand: echo ok
+    startCommand: >-
+      curl -fsS --max-time 180 -X GET
+      -H "Authorization: Bearer $SCRAPE_SECRET"
+      "$APP_URL/api/cron/scrape?batch=9"
     envVars:
       - key: APP_URL
         sync: false
