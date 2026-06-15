@@ -32,7 +32,7 @@ services:
     schedule: "0 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=0"
     envVars:
@@ -48,7 +48,7 @@ services:
     schedule: "10 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=1"
     envVars:
@@ -64,7 +64,7 @@ services:
     schedule: "20 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=2"
     envVars:
@@ -80,7 +80,7 @@ services:
     schedule: "30 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=3"
     envVars:
@@ -96,7 +96,7 @@ services:
     schedule: "40 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=4"
     envVars:
@@ -112,7 +112,7 @@ services:
     schedule: "50 */2 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=5"
     envVars:
@@ -128,7 +128,7 @@ services:
     schedule: "5 */6 * * *"
     buildCommand: echo ok
     startCommand: >-
-      curl -fsS -X GET
+      curl -fsS --max-time 180 -X GET
       -H "Authorization: Bearer $SCRAPE_SECRET"
       "$APP_URL/api/cron/scrape?batch=retry"
     envVars:

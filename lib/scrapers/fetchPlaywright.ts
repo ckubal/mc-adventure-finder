@@ -29,7 +29,9 @@ export async function fetchWithPlaywrightWait(
   try {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-    await page.waitForSelector(selector, { timeout: timeoutMs });
+    // attached, not visible — calendar nodes are often in DOM but off-screen/hidden on headless Render.
+    await page.waitForSelector(selector, { timeout: timeoutMs, state: "attached" });
+    await page.waitForTimeout(1500);
     return await page.content();
   } finally {
     await browser.close();
