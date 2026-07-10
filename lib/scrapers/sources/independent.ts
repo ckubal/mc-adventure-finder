@@ -214,6 +214,13 @@ export const independentScraper: Scraper = {
 
     const eventSlug = (url: string) => url.split("/").filter(Boolean).pop()?.replace(/\/$/, "") ?? "";
 
+    // The calendar's aria-label already gives a clean title + exact date/time, so the
+    // per-event detail fetch is only for descriptions. Cap total time spent on it to stay
+    // under Render's 60s route limit — beyond the budget we return calendar-only data so
+    // every event still lands (better than truncating the whole batch).
+    const enrichStart = Date.now();
+    const ENRICH_BUDGET_MS = 30_000;
+
     const enrichWithJsonLd = async (row: CalendarRow): Promise<RawEvent> => {
       // Prefer the calendar's own link text (clean, e.g. "Young Franco") over the URL
       // slug; JSON-LD from the detail page can still override it below when reachable.
@@ -221,7 +228,7 @@ export const independentScraper: Scraper = {
       let startAt = calendarStartAt(row);
       let description: string | null = null;
 
-      if (shouldFetchDetail(row.fullUrl)) {
+      if (shouldFetchDetail(row.fullUrl) && Date.now() - enrichStart < ENRICH_BUDGET_MS) {
         try {
           const { html: detailHtml } = await fetchHtmlWithUrl(row.fullUrl, DETAIL_FETCH_TIMEOUT_MS);
 
