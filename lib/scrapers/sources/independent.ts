@@ -1,91 +1,52 @@
-import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
-import { fetchCalendarMonths } from "../fetchPlaywright";
-import {
-  extractJsonLdEvent,
-  titleFromJsonLdEvent,
-  startDateFromJsonLdEvent,
-  extractFallbackTitleFromJsonLd,
-} from "../jsonLdEvent";
-import { dateFromZonedParts, isoFromZonedParts, parseIsoAssumingTimeZone } from "../timezone";
+import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://www.theindependentsf.com";
 const CALENDAR_URL = `${BASE_URL}/calendar/`;
+const AJAX_URL = `${BASE_URL}/wp-admin/admin-ajax.php`;
 
-const DETAIL_FETCH_TIMEOUT_MS = 8_000;
-const CONCURRENCY = 5;
+/** How many days ahead to request from the calendar API (runScrapers applies the real cutoff). */
+const WINDOW_DAYS = 100;
 
-/** Decode HTML entities and drop the redundant "| The Independent SF" venue suffix. */
-function cleanTitle(raw: string): string {
-  const decoded = cheerio.load(`<div>${raw}</div>`).text();
-  return decoded
-    .replace(/\s*[|\-–—]\s*The Independent(?:\s*SF)?\s*$/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+/**
+ * The Independent's calendar is a FullCalendar widget backed by a WordPress AJAX endpoint
+ * (`admin-ajax.php?action=get_events_for_calendar`) that returns clean JSON for a date range.
+ * Rather than scrape rendered tiles one month at a time (slow + flaky on headless Render), we
+ * load the calendar once to capture the widget's own request (nonce + params), then replay it
+ * for the full window in a single call — every event, fast.
+ */
+type IndCalEvent = {
+  id?: number | string;
+  start?: string;
+  title?: string;
+  doors?: string;
+  url?: string;
+  displayTime?: string;
+  sortkey?: string;
+};
+
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
 }
 
-function parseDate(dateStr: string, timeStr: string): string {
-  const trimmed = dateStr.trim();
-  const timeTrimmed = timeStr.trim().toLowerCase().replace(/^show:\s*/i, "");
-  if (!trimmed) return "";
-  const isoDayMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  const slashMatch = trimmed.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  const dotMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})$/);
-  const wordMatch =
-    trimmed.match(/([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})/) ||
-    trimmed.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+([A-Za-z]+)\s+(\d{1,2})/i);
-  let month: number;
-  let day: number;
-  let year: number;
-  if (isoDayMatch) {
-    year = parseInt(isoDayMatch[1], 10);
-    month = parseInt(isoDayMatch[2], 10) - 1;
-    day = parseInt(isoDayMatch[3], 10);
-  } else if (slashMatch) {
-    month = parseInt(slashMatch[1], 10) - 1;
-    day = parseInt(slashMatch[2], 10);
-    year = parseInt(slashMatch[3], 10);
-  } else if (dotMatch) {
-    month = parseInt(dotMatch[1], 10) - 1;
-    day = parseInt(dotMatch[2], 10);
-    const now = new Date();
-    year = now.getFullYear();
-    const d = dateFromZonedParts({ year, month: month + 1, day, hour: 0, minute: 0, second: 0 });
-    if (d < now) year += 1;
-  } else if (wordMatch) {
-    const months: Record<string, number> = {
-      Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
-    };
-    month = months[wordMatch[1].slice(0, 3)] ?? 0;
-    day = parseInt(wordMatch[2], 10);
-    year = wordMatch[3] ? parseInt(wordMatch[3], 10) : new Date().getFullYear();
-    if (!wordMatch[3]) {
-      const now = new Date();
-      const d = new Date(year, month, day);
-      if (d < now) year += 1;
-    }
-  } else {
-    return "";
-  }
-  if (!year || !day) return "";
-  let hours = 20;
-  let minutes = 0;
-  if (timeTrimmed && timeTrimmed !== "all day") {
-    const m = timeTrimmed.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-    if (m) {
-      hours = parseInt(m[1], 10);
-      minutes = m[2] ? parseInt(m[2], 10) : 0;
-      if (m[3] === "pm" && hours < 12) hours += 12;
-      if (m[3] === "am" && hours === 12) hours = 0;
-    }
-  }
-  return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
+/** Format a Date as "YYYY-M-D HH:MM:SS" in local server terms (matches the widget's request). */
+function fmt(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** Parse ISO local or offset date (e.g. "2026-02-12T20:00" or "2026-02-12T20:00-08:00") to ISO string. */
-function parseStartDate(iso: string): string | null {
-  return parseIsoAssumingTimeZone(iso);
+/** sortkey is "2026-07-10 21:00:00" in America/Los_Angeles; fall back to the date + 8pm. */
+function startFromEvent(e: IndCalEvent): string | null {
+  const raw = e.sortkey || (e.start ? `${e.start} 20:00:00` : "");
+  const m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return isoFromZonedParts({
+    year: +m[1],
+    month: +m[2],
+    day: +m[3],
+    hour: +m[4],
+    minute: +m[5],
+    second: +(m[6] || 0),
+  });
 }
 
 export const independentScraper: Scraper = {
@@ -93,211 +54,88 @@ export const independentScraper: Scraper = {
   name: "The Independent",
 
   async fetch() {
-    // FullCalendar only renders one month at a time; advance a few months so we
-    // cover the scrape window instead of just the current ~3 weeks.
-    return fetchCalendarMonths(
-      CALENDAR_URL,
-      '.fc-event[aria-label], .tw-calendar-event-content, a[href*="tm-event"]',
-      ".fc-next-button",
-      3,
-      45_000
-    );
+    process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      let widgetPost: string | null = null;
+      page.on("request", (req) => {
+        if (
+          !widgetPost &&
+          /admin-ajax\.php/i.test(req.url()) &&
+          req.method() === "POST" &&
+          /get_events_for_calendar/.test(req.postData() || "")
+        ) {
+          widgetPost = req.postData();
+        }
+      });
+
+      await page.goto(CALENDAR_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      // Wait for the widget to fire its own AJAX (gives us the current nonce + params).
+      for (let i = 0; i < 12 && !widgetPost; i++) await page.waitForTimeout(1000);
+      if (!widgetPost) throw new Error("Independent: never captured get_events_for_calendar request");
+
+      const now = new Date();
+      const end = new Date(now.getTime() + WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const startStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()} 00:00:00`;
+      const body = (widgetPost as string)
+        .replace(/start=[^&]*/, `start=${encodeURIComponent(startStr)}`)
+        .replace(/end=[^&]*/, `end=${encodeURIComponent(fmt(end).replace(/ .*$/, " 23:59:59"))}`);
+
+      const res = await page.evaluate(
+        async ({ url, b }) => {
+          const r = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+            },
+            body: b,
+          });
+          return { status: r.status, text: await r.text() };
+        },
+        { url: AJAX_URL, b: body }
+      );
+
+      if (res.status !== 200) throw new Error(`Independent AJAX HTTP ${res.status}`);
+      return res.text;
+    } finally {
+      await browser.close();
+    }
   },
 
-  async parse(html: string): Promise<RawEvent[]> {
-    const $ = cheerio.load(html);
-    const base = new URL(CALENDAR_URL);
-
-    type CalendarRow = { href: string; fullUrl: string; dateStr: string; timeStr: string; linkText: string; slugTitle: string };
-    const rows: CalendarRow[] = [];
-    const seenUrls = new Set<string>();
-
-    // FullCalendar grid (common on headless Render): aria-label="Choker|2026-06-17|8:00 PM"
-    $(".fc-event[aria-label], .fc-daygrid-event[aria-label]").each((_, el) => {
-      const $ev = $(el);
-      const label = ($ev.attr("aria-label") || $ev.attr("title") || "").trim();
-      const m = label.match(/^(.+?)\|(\d{4}-\d{2}-\d{2})\|(.+)$/);
-      if (!m) return;
-      const [, title, isoDate, timePart] = m;
-      // The .fc-event element is itself the <a>, whose href points at a dialog
-      // (e.g. href="#tw-event-dialog-2486"). The real ticket URL lives inside that
-      // dialog's .tw-name link, so resolve it there rather than on the calendar tile.
-      let href = $ev.find('a[href*="tm-event"]').first().attr("href");
-      if (!href) {
-        const dialogRef = ($ev.attr("href") || "").trim();
-        if (dialogRef.startsWith("#") && dialogRef.length > 1) {
-          const $dialog = $(dialogRef);
-          href =
-            $dialog.find('a[href*="tm-event"]').first().attr("href") ||
-            $dialog.find('a[href*="ticketweb.com"]').first().attr("href");
-        }
-      }
-      if (!href) return;
-      const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
-      if (seenUrls.has(fullUrl)) return;
-      seenUrls.add(fullUrl);
-      rows.push({
-        href,
-        fullUrl,
-        dateStr: isoDate,
-        timeStr: timePart,
-        linkText: title.trim(),
-        slugTitle: title.trim(),
-      });
-    });
-
-    const pushRow = (
-      $event: ReturnType<typeof $>,
-      $nameLink: ReturnType<typeof $>,
-      href: string
-    ) => {
-      const dateStr =
-        $event.find(".tw-event-date").first().text().trim() ||
-        $event.find(".tw-calendar-event-date").first().text().trim() ||
-        $event.closest(".tw-cal-event").find(".tw-event-date").first().text().trim();
-      if (!dateStr) return;
-
-      const timeStr =
-        $event.find(".tw-calendar-event-time, .tw-event-time").first().text().trim() ||
-        $event.text().match(/Show:\s*(\d{1,2}(?::\d{2})?\s*[ap]m)/i)?.[0] ||
-        "8:00 PM";
-
-      const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
-      if (seenUrls.has(fullUrl)) return;
-
-      const linkText = ($nameLink.attr("title") || $nameLink.text()).trim();
-      const slugTitle =
-        href
-          .split("/")
-          .filter(Boolean)
-          .pop()
-          ?.replace(/-/g, " ") ?? "Show at The Independent";
-
-      rows.push({ href, fullUrl, dateStr, timeStr, linkText, slugTitle });
-      seenUrls.add(fullUrl);
-    };
-
-    $(".tw-cal-event").each((_, el) => {
-      const $event = $(el);
-      const $nameLink = $event.find(".tw-name a[href*='tm-event'], .tw-calendar-event-title a[href*='tm-event']").first();
-      const href = $nameLink.attr("href");
-      if (!href) return;
-      pushRow($event, $nameLink, href);
-    });
-
-    $(".tw-calendar-event-content").each((_, el) => {
-      const $event = $(el);
-      const $nameLink = $event.find("a[href*='tm-event']").first();
-      const href = $nameLink.attr("href");
-      if (!href) return;
-      pushRow($event, $nameLink, href);
-    });
-
-    if (rows.length === 0) {
-      $('a[href*="tm-event"]').each((_, el) => {
-        const $nameLink = $(el);
-        const href = $nameLink.attr("href");
-        if (!href) return;
-        const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
-        if (seenUrls.has(fullUrl)) return;
-        const $event = $nameLink.closest(".tw-cal-event, .tw-calendar-event-content, li, article, div");
-        pushRow($event, $nameLink, href);
-      });
+  parse(json: string): RawEvent[] {
+    let items: IndCalEvent[] = [];
+    try {
+      const parsed = JSON.parse(json);
+      if (Array.isArray(parsed)) items = parsed;
+      else if (parsed && Array.isArray(parsed.events)) items = parsed.events;
+    } catch {
+      return [];
     }
 
-    const calendarStartAt = (row: CalendarRow) => parseDate(row.dateStr, row.timeStr);
-
+    const seen = new Set<string>();
     const events: RawEvent[] = [];
 
-    const shouldFetchDetail = (url: string) =>
-      /ticketweb\.com/i.test(url) || /theindependentsf\.com\/tm-event\//i.test(url);
+    for (const e of items) {
+      const title = (e.title || "").replace(/\s+/g, " ").trim();
+      if (!title) continue;
+      const startAt = startFromEvent(e);
+      if (!startAt) continue;
 
-    const eventSlug = (url: string) => url.split("/").filter(Boolean).pop()?.replace(/\/$/, "") ?? "";
+      const eventId = e.id != null ? `ind-${e.id}` : `ind-${title}-${e.start ?? ""}`;
+      if (seen.has(eventId)) continue;
+      seen.add(eventId);
 
-    // The calendar's aria-label already gives a clean title + exact date/time, so the
-    // per-event detail fetch only adds a description. On Render the 3-month Playwright
-    // fetch already uses most of the 60s route budget, and the venue rate-limits the
-    // detail pages (they return no usable description anyway), so enrichment mostly costs
-    // time and risks truncating the batch. Keep the code but gate it OFF on the server;
-    // set INDEPENDENT_ENRICH_DETAIL=1 to re-enable locally. Beyond the budget we fall back
-    // to calendar-only data so every event still lands.
-    const enrichStart = Date.now();
-    const ENRICH_BUDGET_MS = 30_000;
-    const enrichDetail = process.env.INDEPENDENT_ENRICH_DETAIL === "1";
-
-    const enrichWithJsonLd = async (row: CalendarRow): Promise<RawEvent> => {
-      // Prefer the calendar's own link text (clean, e.g. "Young Franco") over the URL
-      // slug; JSON-LD from the detail page can still override it below when reachable.
-      let title = row.linkText || row.slugTitle;
-      let startAt = calendarStartAt(row);
-      let description: string | null = null;
-
-      if (enrichDetail && shouldFetchDetail(row.fullUrl) && Date.now() - enrichStart < ENRICH_BUDGET_MS) {
-        try {
-          const { html: detailHtml } = await fetchHtmlWithUrl(row.fullUrl, DETAIL_FETCH_TIMEOUT_MS);
-
-          const ld = extractJsonLdEvent(detailHtml);
-          if (ld) {
-            const ldTitle = titleFromJsonLdEvent(ld);
-            if (ldTitle && ldTitle.length > 1) title = ldTitle;
-            const ldStart = startDateFromJsonLdEvent(ld);
-            if (ldStart) {
-              const parsed = parseStartDate(ldStart);
-              if (parsed) startAt = parsed;
-            }
-            if (ld.description && typeof ld.description === "string") {
-              const desc = ld.description.replace(/<[^>]+>/g, "").trim();
-              if (desc.length > 0) description = desc;
-            }
-          }
-
-          if (!ld || !titleFromJsonLdEvent(ld)) {
-            const fallback = extractFallbackTitleFromJsonLd(detailHtml);
-            if (fallback && fallback.length > 1) title = fallback;
-          }
-
-          if (title === row.slugTitle) {
-            const slug = eventSlug(row.fullUrl);
-            const $ = cheerio.load(detailHtml);
-            const ticketwebHref = $('a[href*="ticketweb.com"]')
-              .toArray()
-              .map((el) => $(el).attr("href"))
-              .find((href) => href && slug && href.includes(slug));
-            if (ticketwebHref) {
-              try {
-                const twHtml = await fetchHtml(ticketwebHref.replace(/&amp;/g, "&"), DETAIL_FETCH_TIMEOUT_MS);
-                const twLd = extractJsonLdEvent(twHtml);
-                const twTitle = twLd ? titleFromJsonLdEvent(twLd) : null;
-                if (twTitle && twTitle.length > 1) title = twTitle;
-                const twStart = twLd ? startDateFromJsonLdEvent(twLd) : null;
-                if (twStart) {
-                  const parsed = parseStartDate(twStart);
-                  if (parsed) startAt = parsed;
-                }
-              } catch {
-                // keep title from fallback or slug
-              }
-            }
-          }
-        } catch {
-          // keep slug title and calendar date
-        }
-      }
-
-      return {
-        title: cleanTitle(title),
+      events.push({
+        title,
         startAt,
-        sourceUrl: row.fullUrl,
+        sourceUrl: CALENDAR_URL,
+        sourceEventId: eventId,
         locationName: "The Independent",
-        description,
         tags: ["concert"],
-      };
-    };
-
-    for (let i = 0; i < rows.length; i += CONCURRENCY) {
-      const chunk = rows.slice(i, i + CONCURRENCY);
-      const chunkResults = await Promise.all(chunk.map(enrichWithJsonLd));
-      events.push(...chunkResults);
+      });
     }
 
     return events;
