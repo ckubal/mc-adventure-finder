@@ -58,6 +58,9 @@ export function AgendaList() {
   const [draftDateRangeEnd, setDraftDateRangeEnd] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Primary view shows ~the next month; "load more" reveals events further out
+  // (all future events are already loaded from Firebase).
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
   const [scrapeElapsed, setScrapeElapsed] = useState(0);
@@ -119,6 +122,20 @@ export function AgendaList() {
 
     return filtered;
   }, [events, selectedSourceIds, dateRangeStart, dateRangeEnd]);
+
+  // Default the primary view to ~the next month. A custom date range or "show all"
+  // opts out. Events beyond the horizon stay loaded and appear via "load more".
+  const HORIZON_DAYS = 31;
+  const applyHorizon = !dateRangeStart && !dateRangeEnd && !showAllUpcoming;
+  const visibleEvents = useMemo(() => {
+    if (applyHorizon) {
+      const today = startOfTodayLA();
+      const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() + HORIZON_DAYS);
+      return filteredEvents.filter((e) => new Date(e.startAt) < cutoff);
+    }
+    return filteredEvents;
+  }, [filteredEvents, applyHorizon]);
+  const hiddenCount = filteredEvents.length - visibleEvents.length;
 
   const toggleSource = useCallback((sourceId: string) => {
     setSelectedSourceIds((prev) => {
@@ -326,7 +343,7 @@ export function AgendaList() {
     );
   }
 
-  const grouped = groupEventsByAgenda(filteredEvents);
+  const grouped = groupEventsByAgenda(visibleEvents);
 
   // Format date for input (YYYY-MM-DD)
   const formatDateForInput = (date: Date): string => {
@@ -565,14 +582,16 @@ export function AgendaList() {
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-bold" style={{ color: "#000", textShadow: "2px 2px 0px #fff" }}>
-            🎉 {filteredEvents.length} event{filteredEvents.length !== 1 ? "s" : ""}
+            🎉 {visibleEvents.length} event{visibleEvents.length !== 1 ? "s" : ""}
             {dateRangeStart && dateRangeEnd
               ? ` from ${formatPickedDateLabel(dateRangeStart)} to ${formatPickedDateLabel(dateRangeEnd)}`
               : dateRangeStart
                 ? ` from ${formatPickedDateLabel(dateRangeStart)} forward`
                 : dateRangeEnd
                   ? ` up to ${formatPickedDateLabel(dateRangeEnd)}`
-                  : " from today forward"} 🎉
+                  : applyHorizon
+                    ? " in the next month"
+                    : " from today forward"} 🎉
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -655,6 +674,52 @@ export function AgendaList() {
           );
         })}
       </div>
+
+      {applyHorizon && visibleEvents.length === 0 && hiddenCount > 0 && (
+        <p className="pt-6 text-center text-sm font-bold" style={{ color: "#000", textShadow: "2px 2px 0px #fff" }}>
+          Nothing in the next month — {hiddenCount} event{hiddenCount !== 1 ? "s" : ""} further out.
+        </p>
+      )}
+
+      {applyHorizon && hiddenCount > 0 && (
+        <div className="flex justify-center pt-4">
+          <button
+            type="button"
+            onClick={() => setShowAllUpcoming(true)}
+            className="px-4 py-2 text-sm font-bold border-2 border-black"
+            style={{
+              background: "linear-gradient(135deg, #ffff00, #00ffff)",
+              color: "#000",
+              textShadow: "1px 1px 0px #fff",
+              boxShadow: "3px 3px 0px #000",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = "translate(2px, 2px)";
+              e.currentTarget.style.boxShadow = "1px 1px 0px #000";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translate(0, 0)";
+              e.currentTarget.style.boxShadow = "3px 3px 0px #000";
+            }}
+          >
+            ↓ Load {hiddenCount} more event{hiddenCount !== 1 ? "s" : ""} further out
+          </button>
+        </div>
+      )}
+
+      {showAllUpcoming && !dateRangeStart && !dateRangeEnd && (
+        <div className="flex justify-center pt-4">
+          <button
+            type="button"
+            onClick={() => setShowAllUpcoming(false)}
+            className="px-4 py-2 text-sm font-bold border-2 border-black"
+            style={{ background: "#fff", color: "#000", boxShadow: "3px 3px 0px #000", cursor: "pointer" }}
+          >
+            ↑ Show only the next month
+          </button>
+        </div>
+      )}
 
       {filteredEvents.length === 0 && (
         <p className="py-8 text-center text-xl font-bold" style={{
