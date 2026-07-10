@@ -6,7 +6,7 @@ export const SCRAPE_BATCHES: string[][] = [
   // Fast HTTP / API sources
   ["funcheap", "envelop", "makeoutroom", "brickandmortar", "booksmith", "giants", "warriors"],
   // Medium HTTP + detail enrichment
-  ["rickshaw", "cafedunord", "grayarea", "greenapple"],
+  ["rickshaw", "cafedunord", "grayarea", "greenapple", "faight"],
   // Playwright venue calendars (one per batch — detail fetches are slow)
   ["castro"],
   ["independent"],

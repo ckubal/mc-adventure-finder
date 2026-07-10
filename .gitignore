@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+*.zip
 firebase-service-account.json
 
 # debug

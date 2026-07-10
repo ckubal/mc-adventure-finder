@@ -87,3 +87,4 @@ The `/api/scrape/run` pipeline only upserts events that start within a configura
 - `makeoutroom` - Make Out Room
 - `cobbs` - Cobb's Comedy Club
 - `punchline` - Punch Line Comedy Club
+- `faight` - The Faight (Eventbrite-backed)

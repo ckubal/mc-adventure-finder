@@ -18,6 +18,7 @@ import { folsom1015Scraper } from "./1015folsom";
 import { warriorsScraper } from "./warriors";
 import { giantsScraper } from "./giants";
 import { castroScraper } from "./castro";
+import { faightScraper } from "./faight";
 
 export function registerAllScrapers(): void {
   registerScraper(greenAppleScraper);
@@ -39,6 +40,7 @@ export function registerAllScrapers(): void {
   registerScraper(warriorsScraper);
   registerScraper(giantsScraper);
   registerScraper(castroScraper);
+  registerScraper(faightScraper);
 }
 
 export {
@@ -61,4 +63,5 @@ export {
   warriorsScraper,
   giantsScraper,
   castroScraper,
+  faightScraper,
 };

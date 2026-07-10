@@ -1,0 +1,74 @@
+name: Scrape events into Firebase
+
+# Refreshes the Firestore event cache by invoking the app's cron scrape endpoint
+# once per batch. This replaces the Render blueprint cron jobs (which weren't firing).
+# The site reads from Firestore, so this is what keeps the data fresh.
+
+on:
+  schedule:
+    # Every 2 hours. GitHub cron is UTC.
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      batch:
+        description: "Single batch to run (0-8 or 'retry'). Leave blank to run all."
+        required: false
+        default: ""
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Override in repo Settings → Secrets and variables → Actions → Variables if the
+      # deployment URL changes. SCRAPE_SECRET is optional (the endpoint is currently open);
+      # set it as a repo secret once SCRAPE_SECRET is also set on Render.
+      APP_URL: ${{ vars.APP_URL || 'https://mc-adventure-finder.onrender.com' }}
+      SCRAPE_SECRET: ${{ secrets.SCRAPE_SECRET }}
+    steps:
+      - name: Scrape batches
+        run: |
+          set -uo pipefail
+
+          auth=()
+          if [ -n "${SCRAPE_SECRET:-}" ]; then
+            auth=(-H "Authorization: Bearer ${SCRAPE_SECRET}")
+          fi
+
+          run_batch () {
+            local batch="$1"
+            echo "::group::batch ${batch}"
+            local code
+            # Retry a few times; Render free instances can cold-start or briefly 503.
+            for attempt in 1 2 3; do
+              code=$(curl -sS --max-time 300 -o /tmp/resp.json -w "%{http_code}" \
+                "${auth[@]}" "${APP_URL}/api/cron/scrape?batch=${batch}" || echo "000")
+              echo "attempt ${attempt}: HTTP ${code}"
+              if [ "${code}" = "200" ]; then break; fi
+              sleep 15
+            done
+            echo "response:"; head -c 1200 /tmp/resp.json; echo
+            echo "::endgroup::"
+            if [ "${code}" != "200" ]; then
+              echo "batch ${batch} failed with HTTP ${code}"
+              return 1
+            fi
+          }
+
+          input_batch="${{ github.event.inputs.batch }}"
+          fail=0
+          if [ -n "${input_batch}" ]; then
+            run_batch "${input_batch}" || fail=1
+          else
+            for b in 0 1 2 3 4 5 6 7 8; do
+              run_batch "${b}" || fail=1
+              sleep 5
+            done
+            # Retry any sources that failed this cycle.
+            run_batch "retry" || true
+          fi
+          exit ${fail}

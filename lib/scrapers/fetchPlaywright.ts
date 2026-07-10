@@ -39,6 +39,47 @@ export async function fetchWithPlaywrightWait(
 }
 
 /**
+ * Fetch a JS calendar (e.g. FullCalendar) and advance through several months,
+ * accumulating each month's rendered HTML. Returns the concatenated HTML so a
+ * cheerio parser sees every month's events (parsers should dedupe by URL).
+ * Used for venues whose calendar only renders the current month at a time.
+ */
+export async function fetchCalendarMonths(
+  url: string,
+  waitSelector: string,
+  nextButtonSelector: string,
+  months = 3,
+  timeoutMs = 45_000
+): Promise<string> {
+  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    await page.waitForSelector(waitSelector, { timeout: timeoutMs, state: "attached" });
+    await page.waitForTimeout(1500);
+
+    const chunks: string[] = [await page.content()];
+    for (let i = 1; i < months; i++) {
+      const next = page.locator(nextButtonSelector).first();
+      if (!(await next.count())) break;
+      try {
+        await next.click({ timeout: 5000 });
+      } catch {
+        break;
+      }
+      // Let the month's AJAX fetch settle and re-render.
+      await page.waitForTimeout(2500);
+      chunks.push(await page.content());
+    }
+    return chunks.join("\n<!-- month-break -->\n");
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
  * Fetch rendered HTML and attempt to auto-scroll to load more content.
  * Useful for infinite-scroll event listings (e.g. Eventbrite organizer pages).
  */

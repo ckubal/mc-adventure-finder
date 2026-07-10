@@ -27,8 +27,22 @@ function titleFromTicketwebMeta(html: string): string | null {
     $('meta[property="og:title"]').attr("content") ||
     $("title").first().text();
   if (!metaTitle) return null;
-  const t = decodeHtmlEntities(String(metaTitle)).replace(/\s+/g, " ").trim();
+  const t = cleanCafeTitle(String(metaTitle));
   return t.length > 1 ? t : null;
+}
+
+/**
+ * Turn a calendar/meta title into a clean event name. Handles:
+ *  - the calendar anchor's title attr: "Event Name - <TITLE> | Event Date - 09 July"
+ *  - the detail page og:title suffix: "<TITLE> % in San Francisco at Cafe du Nord %"
+ */
+function cleanCafeTitle(raw: string): string {
+  return decodeHtmlEntities(raw)
+    .replace(/^\s*Event\s+Name\s*-\s*/i, "")
+    .replace(/\s*\|\s*Event\s+Date\s*-.*$/i, "")
+    .replace(/\s*%\s*in\s+San\s+Francisco\s+at\s+Cafe\s+du\s+Nord\s*%?\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /** Parse TicketWeb date (e.g. "2.4") and time (e.g. "Show: 8:00 pm"). */
@@ -72,8 +86,9 @@ export const cafeDuNordScraper: Scraper = {
     const $ = cheerio.load(html);
     const base = new URL(CALENDAR_URL);
 
-    type Row = { fullUrl: string; dateStr: string; timeStr: string; slugTitle: string };
+    type Row = { fullUrl: string; dateStr: string; timeStr: string; slugTitle: string; calTitle: string | null };
     const rows: Row[] = [];
+    const seenUrls = new Set<string>();
 
     $(".tw-section").each((_, el) => {
       const $section = $(el);
@@ -87,6 +102,19 @@ export const cafeDuNordScraper: Scraper = {
       if (!startAt) return;
 
       const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
+      // The calendar renders each event more than once (desktop + mobile views); dedupe by URL.
+      if (seenUrls.has(fullUrl)) return;
+      seenUrls.add(fullUrl);
+
+      // The calendar anchor carries a clean per-event title in its title/aria-label
+      // attribute — use it directly instead of hopping to a shared TicketWeb link.
+      const rawAttr =
+        $nameLink.attr("title") ||
+        $nameLink.attr("aria-label") ||
+        $nameLink.text() ||
+        "";
+      const calTitle = cleanCafeTitle(rawAttr) || null;
+
       const slugTitle =
         href
           .split("/")
@@ -94,96 +122,58 @@ export const cafeDuNordScraper: Scraper = {
           .pop()
           ?.replace(/-/g, " ") ?? "Show at Cafe Du Nord";
 
-      rows.push({ fullUrl, dateStr, timeStr, slugTitle });
+      rows.push({ fullUrl, dateStr, timeStr, slugTitle, calTitle });
     });
 
     const calendarStartAt = (row: Row) => parseTwDate(row.dateStr, row.timeStr);
-    const eventSlug = (url: string) => url.split("/").filter(Boolean).pop()?.replace(/\/$/, "") ?? "";
 
-    const shouldFetch = (url: string) => /ticketweb\.com/i.test(url) || /cafedunord\.com\/tm-event\//i.test(url);
+    const shouldFetch = (url: string) => /cafedunord\.com\/tm-event\//i.test(url) || /ticketweb\.com/i.test(url);
 
     const enrich = async (row: Row): Promise<RawEvent> => {
-      let title = row.slugTitle;
+      // The calendar already gives us a clean title + date per event; treat those as
+      // authoritative. The detail page is only used to fill in a description (and to
+      // recover a title/date if the calendar somehow lacked one).
+      let title = row.calTitle || row.slugTitle;
       let startAt = calendarStartAt(row);
       let description: string | null = null;
 
       if (shouldFetch(row.fullUrl)) {
         try {
-          const { html: detailHtml, finalUrl } = await fetchHtmlWithUrl(row.fullUrl, DETAIL_FETCH_TIMEOUT_MS);
+          const { html: detailHtml } = await fetchHtmlWithUrl(row.fullUrl, DETAIL_FETCH_TIMEOUT_MS);
 
-          // If we're already on TicketWeb, get title from meta immediately.
-          if (/ticketweb\.com/i.test(finalUrl)) {
+          // The detail page's own metadata — never a shared "Buy Tickets" link, which
+          // previously collapsed every event onto the venue's next featured show.
+          if (!row.calTitle) {
             const metaTitle = titleFromTicketwebMeta(detailHtml);
-            if (metaTitle) title = metaTitle;
-          } else {
-            // On cafedunord.com page: look for TicketWeb link and fetch it for clean title.
-            const $d = cheerio.load(detailHtml);
-            // Find any TicketWeb link (usually a "Buy Tickets" button).
-            const ticketwebHref = $d('a[href*="ticketweb.com"][href*="/event/"]')
-              .first()
-              .attr("href");
-            if (ticketwebHref) {
-              try {
-                const twHtml = await fetchHtml(ticketwebHref.replace(/&amp;/g, "&"), DETAIL_FETCH_TIMEOUT_MS);
-                const twMetaTitle = titleFromTicketwebMeta(twHtml);
-                if (twMetaTitle && twMetaTitle.length > 1) {
-                  title = twMetaTitle;
-                } else {
-                  // Fallback to TicketWeb JSON-LD if meta not found.
-                  const twLd = extractJsonLdEvent(twHtml);
-                  const twTitle = twLd ? titleFromJsonLdEvent(twLd) : null;
-                  if (twTitle && twTitle.length > 1) title = twTitle;
-                }
-                // Get date/time from TicketWeb if available.
-                const twLd = extractJsonLdEvent(twHtml);
-                const twStart = twLd ? startDateFromJsonLdEvent(twLd) : null;
-                if (twStart) {
-                  const parsed = parseStartDate(twStart);
-                  if (parsed) startAt = parsed;
-                }
-              } catch {
-                // Continue to use cafedunord.com page data.
+            if (metaTitle && metaTitle.length > 1) {
+              title = metaTitle;
+            } else {
+              const ld = extractJsonLdEvent(detailHtml);
+              const ldTitle = ld ? titleFromJsonLdEvent(ld) : null;
+              if (ldTitle) {
+                const cleaned = cleanCafeTitle(ldTitle);
+                if (cleaned.length > 1) title = cleaned;
+              } else {
+                const fallback = extractFallbackTitleFromJsonLd(detailHtml);
+                if (fallback && fallback.length > 1) title = cleanCafeTitle(fallback);
               }
             }
           }
 
-          // If we still have slug title, try JSON-LD from the detail page as fallback.
-          if (title === row.slugTitle) {
-            const ld = extractJsonLdEvent(detailHtml);
-            if (ld) {
-              let ldTitle = titleFromJsonLdEvent(ld);
-              // Clean up cafedunord.com JSON-LD titles that have " % in San Francisco at Cafe du Nord %" suffix.
-              if (ldTitle) {
-                ldTitle = decodeHtmlEntities(ldTitle)
-                  .replace(/\s*%\s*in\s+San\s+Francisco\s+at\s+Cafe\s+du\s+Nord\s*%?\s*$/i, "")
-                  .trim();
-              }
-              if (ldTitle && ldTitle.length > 1) title = ldTitle;
-              const ldStart = startDateFromJsonLdEvent(ld);
-              if (ldStart) {
-                const parsed = parseStartDate(ldStart);
-                if (parsed) startAt = parsed;
-              }
-              if (ld.description && typeof ld.description === "string") {
-                const desc = ld.description.replace(/<[^>]+>/g, "").trim();
-                if (desc.length > 0) description = desc;
-              }
+          const ld = extractJsonLdEvent(detailHtml);
+          if (ld) {
+            const ldStart = startDateFromJsonLdEvent(ld);
+            if (ldStart) {
+              const parsed = parseStartDate(ldStart);
+              if (parsed) startAt = parsed;
             }
-
-            if (title === row.slugTitle) {
-              const fallback = extractFallbackTitleFromJsonLd(detailHtml);
-              if (fallback && fallback.length > 1) title = fallback;
-            }
-          } else {
-            // We have a good title from TicketWeb; still get description from detail page JSON-LD.
-            const ld = extractJsonLdEvent(detailHtml);
-            if (ld?.description && typeof ld.description === "string") {
+            if (ld.description && typeof ld.description === "string") {
               const desc = ld.description.replace(/<[^>]+>/g, "").trim();
               if (desc.length > 0) description = desc;
             }
           }
         } catch {
-          // keep slug and calendar date
+          // keep calendar title and date
         }
       }
 

@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
 import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
-import { fetchWithPlaywrightWait } from "../fetchPlaywright";
+import { fetchCalendarMonths } from "../fetchPlaywright";
 import {
   extractJsonLdEvent,
   titleFromJsonLdEvent,
@@ -15,6 +15,15 @@ const CALENDAR_URL = `${BASE_URL}/calendar/`;
 
 const DETAIL_FETCH_TIMEOUT_MS = 8_000;
 const CONCURRENCY = 5;
+
+/** Decode HTML entities and drop the redundant "| The Independent SF" venue suffix. */
+function cleanTitle(raw: string): string {
+  const decoded = cheerio.load(`<div>${raw}</div>`).text();
+  return decoded
+    .replace(/\s*[|\-–—]\s*The Independent(?:\s*SF)?\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function parseDate(dateStr: string, timeStr: string): string {
   const trimmed = dateStr.trim();
@@ -84,9 +93,13 @@ export const independentScraper: Scraper = {
   name: "The Independent",
 
   async fetch() {
-    return fetchWithPlaywrightWait(
+    // FullCalendar only renders one month at a time; advance a few months so we
+    // cover the scrape window instead of just the current ~3 weeks.
+    return fetchCalendarMonths(
       CALENDAR_URL,
-      'a[href*="tm-event"], .tw-cal-event, .tw-calendar-event-content',
+      '.fc-event[aria-label], .tw-calendar-event-content, a[href*="tm-event"]',
+      ".fc-next-button",
+      3,
       45_000
     );
   },
@@ -106,8 +119,19 @@ export const independentScraper: Scraper = {
       const m = label.match(/^(.+?)\|(\d{4}-\d{2}-\d{2})\|(.+)$/);
       if (!m) return;
       const [, title, isoDate, timePart] = m;
-      const $link = $ev.find('a[href*="tm-event"]').first();
-      const href = $link.attr("href");
+      // The .fc-event element is itself the <a>, whose href points at a dialog
+      // (e.g. href="#tw-event-dialog-2486"). The real ticket URL lives inside that
+      // dialog's .tw-name link, so resolve it there rather than on the calendar tile.
+      let href = $ev.find('a[href*="tm-event"]').first().attr("href");
+      if (!href) {
+        const dialogRef = ($ev.attr("href") || "").trim();
+        if (dialogRef.startsWith("#") && dialogRef.length > 1) {
+          const $dialog = $(dialogRef);
+          href =
+            $dialog.find('a[href*="tm-event"]').first().attr("href") ||
+            $dialog.find('a[href*="ticketweb.com"]').first().attr("href");
+        }
+      }
       if (!href) return;
       const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
       if (seenUrls.has(fullUrl)) return;
@@ -191,13 +215,15 @@ export const independentScraper: Scraper = {
     const eventSlug = (url: string) => url.split("/").filter(Boolean).pop()?.replace(/\/$/, "") ?? "";
 
     const enrichWithJsonLd = async (row: CalendarRow): Promise<RawEvent> => {
-      let title = row.slugTitle;
+      // Prefer the calendar's own link text (clean, e.g. "Young Franco") over the URL
+      // slug; JSON-LD from the detail page can still override it below when reachable.
+      let title = row.linkText || row.slugTitle;
       let startAt = calendarStartAt(row);
       let description: string | null = null;
 
       if (shouldFetchDetail(row.fullUrl)) {
         try {
-          const { html: detailHtml, finalUrl } = await fetchHtmlWithUrl(row.fullUrl, DETAIL_FETCH_TIMEOUT_MS);
+          const { html: detailHtml } = await fetchHtmlWithUrl(row.fullUrl, DETAIL_FETCH_TIMEOUT_MS);
 
           const ld = extractJsonLdEvent(detailHtml);
           if (ld) {
@@ -248,7 +274,7 @@ export const independentScraper: Scraper = {
       }
 
       return {
-        title,
+        title: cleanTitle(title),
         startAt,
         sourceUrl: row.fullUrl,
         locationName: "The Independent",
