@@ -71,7 +71,7 @@ export async function fetchCalendarMonths(
       }
       // Let the month's AJAX fetch settle and re-render (slower on headless Render).
       await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(2500);
       chunks.push(await page.content());
     }
     return chunks.join("\n<!-- month-break -->\n");
