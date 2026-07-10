@@ -1,90 +1,38 @@
-import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchWithPlaywrightWait } from "../fetchPlaywright";
-import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
+import { parseIsoAssumingTimeZone } from "../timezone";
 
 const BASE_URL = "https://www.sfjazz.org";
-const HOMEPAGE_URL = `${BASE_URL}/`;
-
-const MONTH_ABBREV: Record<string, number> = {
-  JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
-  JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
-};
-
-/** Parse time like "8PM", "10:30PM", "1PM" to hours and minutes (24h). Default 7:30 PM. */
-function parseTime(timeStr: string): { hours: number; minutes: number } {
-  const t = timeStr.trim().toUpperCase().replace(/\s/g, "");
-  const m = t.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/);
-  if (!m) return { hours: 19, minutes: 30 };
-  let hours = parseInt(m[1], 10);
-  const minutes = m[2] ? parseInt(m[2], 10) : 0;
-  if ((m[3] || "PM") === "PM" && hours < 12) hours += 12;
-  if ((m[3] || "PM") === "AM" && hours === 12) hours = 0;
-  return { hours, minutes };
-}
+const CALENDAR_URL = `${BASE_URL}/calendar/`;
+const UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /**
- * Parse date line like "WED, DEC 31 • 8PM & 10:30PM", "FRI, JAN 16", "WED-SUN, JAN 28-FEB 1", "SUN, DEC 21 •1PM".
- * Returns ISO string for the first date (and first time if multiple).
+ * SFJazz's site is behind Cloudflare and its calendar is a JS app that loads events
+ * from an internal JSON API (`/ace-api/events/?startDate=&endDate=`). The API 403s on
+ * direct requests, but loading the calendar page in a real browser clears Cloudflare and
+ * fires the API itself — so we drive the page and capture the API responses. We visit
+ * three monthly anchors to cover ~90 days.
  */
-function parseDateLine(line: string): string | null {
-  const trimmed = line.replace(/\s+/g, " ").replace(/\u00a0/g, " ").trim();
-  if (!trimmed) return null;
+type SfjazzApiEvent = {
+  id?: string;
+  name?: string;
+  eventDate?: string;
+  location?: string;
+  synopsis?: string;
+  viewDetailCtaUrl?: string;
+  buyTicketCtaUrl?: string;
+  isStreamingEvent?: boolean;
+  hideFromCalendar?: boolean;
+};
 
+function monthAnchors(count: number): string[] {
   const now = new Date();
-  const currentYear = now.getFullYear();
-
-  // Time part: "• 8PM & 10:30PM" or "•1PM" (optional)
-  const timePart = trimmed.match(/[•&]\s*(\d{1,2}(?::\d{2})?\s*[AP]M)/i);
-  let hours = 19;
-  let minutes = 30;
-  if (timePart) {
-    const parsed = parseTime(timePart[1]);
-    hours = parsed.hours;
-    minutes = parsed.minutes;
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 15);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-15`);
   }
-
-  // "WED, DEC 31" or "DEC 31" or "FRI, JAN 16"
-  const singleMatch = trimmed.match(/(?:MON|TUE|WED|THU|FRI|SAT|SUN),?\s*([A-Z]{3})\s+(\d{1,2})/i)
-    || trimmed.match(/\b([A-Z]{3})\s+(\d{1,2})\b/);
-  if (singleMatch) {
-    const month = MONTH_ABBREV[singleMatch[1].toUpperCase()];
-    if (month == null) return null;
-    const day = parseInt(singleMatch[2], 10);
-    if (day < 1 || day > 31) return null;
-    let year = currentYear;
-    const d = dateFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
-    if (d < now) year = currentYear + 1;
-    return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
-  }
-
-  // "WED-SUN, JAN 28-FEB 1" or "THU-FRI, DEC 18-19" -> use first day
-  const rangeMatch = trimmed.match(/(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:-(?:MON|TUE|WED|THU|FRI|SAT|SUN))?,?\s*([A-Z]{3})\s+(\d{1,2})/i);
-  if (rangeMatch) {
-    const month = MONTH_ABBREV[rangeMatch[1].toUpperCase()];
-    if (month == null) return null;
-    const day = parseInt(rangeMatch[2], 10);
-    if (day < 1 || day > 31) return null;
-    let year = currentYear;
-    const d = dateFromZonedParts({ year, month: month + 1, day, hour: 19, minute: 30, second: 0 });
-    if (d < now) year = currentYear + 1;
-    return isoFromZonedParts({ year, month: month + 1, day, hour: 19, minute: 30, second: 0 });
-  }
-
-  // "MAY 7" or "THU, MAY 7" (no day number in month abbrev)
-  const shortMatch = trimmed.match(/\b([A-Z]{3})\s+(\d{1,2})\b/);
-  if (shortMatch) {
-    const month = MONTH_ABBREV[shortMatch[1].toUpperCase()];
-    if (month == null) return null;
-    const day = parseInt(shortMatch[2], 10);
-    if (day < 1 || day > 31) return null;
-    let year = currentYear;
-    const d = dateFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
-    if (d < now) year = currentYear + 1;
-    return isoFromZonedParts({ year, month: month + 1, day, hour: hours, minute: minutes, second: 0 });
-  }
-
-  return null;
+  return out;
 }
 
 export const sfjazzScraper: Scraper = {
@@ -92,83 +40,85 @@ export const sfjazzScraper: Scraper = {
   name: "SFJazz",
 
   async fetch() {
-    return fetchWithPlaywrightWait(
-      HOMEPAGE_URL,
-      'a[href*="sfjazz.org/link/"][href*=".aspx"]',
-      45_000
-    );
+    process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const page = await browser.newPage({ userAgent: UA });
+      const byId = new Map<string, SfjazzApiEvent>();
+      page.on("response", async (resp) => {
+        if (!/\/ace-api\/events\/\?startDate=/i.test(resp.url()) || resp.status() !== 200) return;
+        try {
+          const arr = JSON.parse(await resp.text());
+          if (Array.isArray(arr)) {
+            for (const e of arr as SfjazzApiEvent[]) if (e?.id) byId.set(e.id, e);
+          }
+        } catch {
+          // ignore non-JSON
+        }
+      });
+
+      const anchors = monthAnchors(3);
+      for (let i = 0; i < anchors.length; i++) {
+        await page.goto(`${CALENDAR_URL}?date=${anchors[i]}&layout=A`, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+        // First visit may show Cloudflare's "Just a moment…" interstitial; wait it out.
+        for (let t = 0; t < 8; t++) {
+          await page.waitForTimeout(1500);
+          const title = await page.title().catch(() => "");
+          if (title && !/just a moment/i.test(title)) break;
+        }
+        // Give the calendar's API call time to fire and resolve.
+        await page.waitForTimeout(2500);
+      }
+
+      return JSON.stringify([...byId.values()]);
+    } finally {
+      await browser.close();
+    }
   },
 
-  parse(html: string): RawEvent[] {
-    const $ = cheerio.load(html);
+  parse(json: string): RawEvent[] {
+    let items: SfjazzApiEvent[] = [];
+    try {
+      const parsed = JSON.parse(json);
+      if (Array.isArray(parsed)) items = parsed;
+    } catch {
+      return [];
+    }
+
+    // One entry per show per day (SFJazz often lists 6PM + 8:30PM as separate rows).
+    const seen = new Set<string>();
     const events: RawEvent[] = [];
-    const base = new URL(HOMEPAGE_URL);
-    const seenUrls = new Set<string>();
 
-    // Homepage: event blocks have ticket links to sfjazz.org/link/*.aspx. Find "Buy Tickets" / "Save The Date" links and their event block.
-    $('a[href*="sfjazz.org/link/"][href*=".aspx"]').each((_, el) => {
-      const $a = $(el);
-      const href = $a.attr("href");
-      const linkText = $a.text().trim().toLowerCase();
-      // Only event ticket links; skip Join, More, INFO, View Archive, Inquire, etc.
-      if (!href || seenUrls.has(href)) return;
-      if (!linkText.includes("buy tickets") && !linkText.includes("save the date")) return;
+    for (const e of items) {
+      if (!e.name || !e.eventDate) continue;
+      if (e.hideFromCalendar) continue;
+      if (e.isStreamingEvent) continue; // "SFJAZZ At Home" digital events — not in-person
 
-      const fullUrl = href.startsWith("http") ? href : new URL(href, base).href;
-      if (!fullUrl.includes("sfjazz.org")) return;
-      seenUrls.add(fullUrl);
+      const startAt = parseIsoAssumingTimeZone(e.eventDate);
+      if (!startAt) continue;
 
-      // Find the event block: walk up to a container that has a heading or date-like text
-      let $block = $a.closest("section, article, [class*='event'], [class*='card'], [class*='slide']").first();
-      if (!$block.length) $block = $a.parent();
-      for (let i = 0; i < 5 && $block.length; i++) {
-        const text = $block.text();
-        if (text.length > 100 && (/\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{1,2}\b/.test(text) || /\b(MON|TUE|WED|THU|FRI|SAT|SUN)[,\s]/.test(text)))
-          break;
-        $block = $block.parent();
-      }
-      const blockHtml = $block.length ? $block : $a.parent();
+      const dayKey = `${e.name}|${startAt.slice(0, 10)}`;
+      if (seen.has(dayKey)) continue;
+      seen.add(dayKey);
 
-      // Date: look for h6 or text that looks like "WED, DEC 31 • 8PM"
-      let dateLine = blockHtml.find("h6").first().text().trim();
-      if (!dateLine) {
-        const text = blockHtml.text();
-        const dateLike = text.match(/(?:MON|TUE|WED|THU|FRI|SAT|SUN)[A-Z\s,\-•&\d:APM]+/);
-        if (dateLike) dateLine = dateLike[0].trim();
-      }
-      const startAt = dateLine ? parseDateLine(dateLine) : null;
-      if (!startAt) return;
-
-      // Title: h3, h4, h2, or image alt (SFJazz often uses img alt for artist name)
-      let title =
-        blockHtml.find("h3").first().text().trim() ||
-        blockHtml.find("h4").first().text().trim() ||
-        blockHtml.find("h2").first().text().trim() ||
-        blockHtml.find("img[alt]").first().attr("alt")?.trim() ||
-        blockHtml.find("[class*='title'], [class*='name']").first().text().trim();
-      if (!title || title.length < 2) return;
-
-      title = title.replace(/\s+/g, " ").trim();
-
-      // Description: first substantial paragraph (skip "Buy Tickets" etc.)
-      let description: string | null = blockHtml.find("p").first().text().trim() || null;
-      if (description && (description.length < 15 || description.toLowerCase().includes("buy tickets")))
-        description = null;
-
-      // Venue: often SFJazz Center; sometimes Davies Symphony Hall
-      let locationName = "SFJazz Center";
-      const blockText = blockHtml.text();
-      if (blockText.includes("Davies Symphony Hall")) locationName = "Davies Symphony Hall";
+      const rel = e.viewDetailCtaUrl || e.buyTicketCtaUrl || "";
+      const sourceUrl = rel ? (rel.startsWith("http") ? rel : `${BASE_URL}${rel}`) : CALENDAR_URL;
+      const description = e.synopsis ? e.synopsis.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() : null;
 
       events.push({
-        title,
+        title: e.name.replace(/\s+/g, " ").trim(),
         startAt,
-        sourceUrl: fullUrl,
-        description,
-        locationName,
+        sourceUrl,
+        sourceEventId: `sfjazz-${dayKey}`,
+        locationName: e.location ? `SFJazz Center — ${e.location}` : "SFJazz Center",
+        description: description || null,
         tags: ["jazz", "music"],
       });
-    });
+    }
 
     return events;
   },

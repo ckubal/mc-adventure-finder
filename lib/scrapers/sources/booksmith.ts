@@ -1,43 +1,18 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
-import { extractJsonLdEvent } from "../jsonLdEvent";
+import { fetchWithPlaywrightWait } from "../fetchPlaywright";
 import { dateFromZonedParts, isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://booksmith.com";
 const EVENTS_URL = `${BASE_URL}/events/list/upcoming-events`;
-
-function parseDate(dateStr: string, timeStr: string): string {
-  const trimmed = dateStr.trim();
-  const timeTrimmed = timeStr.trim().toLowerCase();
-  if (!trimmed) return "";
-  const parts = trimmed.split(",").map((s) => s.trim());
-  const datePart = parts[parts.length - 1];
-  const [month, day, year] = datePart.split("/").map((s) => parseInt(s, 10));
-  if (!year || !month || !day) return "";
-  let hours = 19;
-  let minutes = 0;
-  if (timeTrimmed && timeTrimmed !== "all day") {
-    const match = timeTrimmed.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-    if (match) {
-      hours = parseInt(match[1], 10);
-      minutes = match[2] ? parseInt(match[2], 10) : 0;
-      if (match[3] === "pm" && hours < 12) hours += 12;
-      if (match[3] === "am" && hours === 12) hours = 0;
-    }
-  }
-  return isoFromZonedParts({ year, month, day, hour: hours, minute: minutes, second: 0 });
-}
-
-const DETAIL_FETCH_TIMEOUT_MS = 8_000;
-const CONCURRENCY = 5;
 
 export const booksmithScraper: Scraper = {
   id: "booksmith",
   name: "The Booksmith",
 
   async fetch() {
-    return fetchHtml(EVENTS_URL);
+    // booksmith.com sits behind a WAF that 403s plain HTTP; a real browser passes.
+    return fetchWithPlaywrightWait(EVENTS_URL, "article.event-list", 30_000);
   },
 
   async parse(html: string): Promise<RawEvent[]> {
@@ -91,39 +66,9 @@ export const booksmithScraper: Scraper = {
       });
     });
 
-    // Enrich with descriptions from detail pages
-    const enrichedEvents: RawEvent[] = [];
-    for (let i = 0; i < events.length; i += CONCURRENCY) {
-      const chunk = events.slice(i, i + CONCURRENCY);
-      const enriched = await Promise.all(
-        chunk.map(async (event) => {
-          try {
-            const { html: detailHtml } = await fetchHtmlWithUrl(event.sourceUrl, DETAIL_FETCH_TIMEOUT_MS);
-            const ld = extractJsonLdEvent(detailHtml);
-            let description: string | null = null;
-            if (ld?.description && typeof ld.description === "string") {
-              const desc = ld.description.replace(/<[^>]+>/g, "").trim();
-              if (desc.length > 0) description = desc;
-            } else {
-              const $ = cheerio.load(detailHtml);
-              const metaDesc = $('meta[name="description"]').attr("content");
-              if (metaDesc && metaDesc.length > 20) {
-                description = metaDesc.trim();
-              } else {
-                const content = $("main, article, .content, .event-detail, .event-description").first().text().trim();
-                if (content && content.length > 50 && content.length < 500) {
-                  description = content.slice(0, 300);
-                }
-              }
-            }
-            return { ...event, description };
-          } catch {
-            return event;
-          }
-        })
-      );
-      enrichedEvents.push(...enriched);
-    }
-    return enrichedEvents;
+    // Detail pages sit behind the same WAF (403 on plain HTTP), and fetching each with
+    // Playwright would be too slow on Render, so we skip description enrichment. The list
+    // gives us title, date and link — enough for the agenda.
+    return events;
   },
 };
