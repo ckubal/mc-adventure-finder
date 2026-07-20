@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
         locationAddress: d.locationAddress ?? null,
         description: d.description ?? null,
         tags: Array.isArray(d.tags) ? d.tags : [],
-        raw: d.raw,
+        // Omit Firestore `raw` — unused by the UI and can be large.
       };
     });
 

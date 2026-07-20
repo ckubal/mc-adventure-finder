@@ -40,9 +40,8 @@ export const sfjazzScraper: Scraper = {
   name: "SFJazz",
 
   async fetch() {
-    process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const { launchChromium } = await import("../launchChromium");
+    const browser = await launchChromium();
     try {
       const page = await browser.newPage({ userAgent: UA });
       const byId = new Map<string, SfjazzApiEvent>();
@@ -76,7 +75,7 @@ export const sfjazzScraper: Scraper = {
 
       return JSON.stringify([...byId.values()]);
     } finally {
-      await browser.close();
+      await browser.close().catch(() => undefined);
     }
   },
 

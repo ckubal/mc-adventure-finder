@@ -26,9 +26,7 @@ function toFirestoreDoc(normalized: NormalizedEvent): Record<string, unknown> {
     description: normalized.description ?? null,
     tags: normalized.tags ?? [],
   };
-  if (normalized.raw != null && typeof normalized.raw === "object" && Object.keys(normalized.raw).length > 0) {
-    doc.raw = normalized.raw;
-  }
+  // Intentionally omit `raw` — unused by the UI and inflates memory on small Render instances.
   return doc;
 }
 

@@ -1,19 +1,18 @@
+import { launchChromium } from "./launchChromium";
+
 /**
  * Fetch rendered HTML from a URL using Playwright (for JS-rendered pages).
  * Use in scrapers whose sites show "Loading…" in static HTML.
  */
 export async function fetchWithPlaywright(url: string): Promise<string> {
-  // Ensure Playwright looks for browsers bundled with the app (not ephemeral OS cache).
-  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchChromium();
   try {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
     const html = await page.content();
     return html;
   } finally {
-    await browser.close();
+    await browser.close().catch(() => undefined);
   }
 }
 
@@ -23,9 +22,7 @@ export async function fetchWithPlaywrightWait(
   selector: string,
   timeoutMs = 45_000
 ): Promise<string> {
-  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchChromium();
   try {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
@@ -34,7 +31,7 @@ export async function fetchWithPlaywrightWait(
     await page.waitForTimeout(1500);
     return await page.content();
   } finally {
-    await browser.close();
+    await browser.close().catch(() => undefined);
   }
 }
 
@@ -62,13 +59,10 @@ export async function fetchWithPlaywrightAutoScroll(
   const scrollWaitMs = opts?.scrollWaitMs ?? 1200;
   const stabilizeSelector = opts?.stabilizeSelector;
 
-  // Ensure Playwright looks for browsers bundled with the app (not ephemeral OS cache).
-  process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchChromium();
   try {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
 
     if (opts?.clickUpcomingTab) {
       try {
@@ -118,6 +112,6 @@ export async function fetchWithPlaywrightAutoScroll(
 
     return await page.content();
   } finally {
-    await browser.close();
+    await browser.close().catch(() => undefined);
   }
 }

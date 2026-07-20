@@ -8,6 +8,7 @@ import {
   sourceIdsForBatch,
 } from "@/lib/scrapers/batches";
 import { isScrapeAuthorized } from "@/lib/scrapers/scrapeAuth";
+import { tryAcquireScrapeLock, releaseScrapeLock } from "@/lib/scrapers/scrapeLock";
 
 registerAllScrapers();
 
@@ -28,6 +29,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Firebase not configured" }, { status: 503 });
   }
 
+  if (!tryAcquireScrapeLock()) {
+    return NextResponse.json(
+      { ok: false, error: "Scrape already in progress" },
+      { status: 429 }
+    );
+  }
+
+  try {
   const url = new URL(req.url ?? "/", "http://localhost");
   const batchParam = url.searchParams.get("batch")?.trim() ?? "0";
 
@@ -93,4 +102,7 @@ export async function GET(req: NextRequest) {
     results,
     failedSourceIds: failed.map((f) => f.sourceId),
   });
+  } finally {
+    releaseScrapeLock();
+  }
 }

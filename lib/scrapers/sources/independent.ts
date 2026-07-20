@@ -54,9 +54,8 @@ export const independentScraper: Scraper = {
   name: "The Independent",
 
   async fetch() {
-    process.env.PLAYWRIGHT_BROWSERS_PATH ||= "0";
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch({ headless: true });
+    const { launchChromium } = await import("../launchChromium");
+    const browser = await launchChromium();
     try {
       const page = await browser.newPage();
       let widgetPost: string | null = null;
@@ -101,7 +100,7 @@ export const independentScraper: Scraper = {
       if (res.status !== 200) throw new Error(`Independent AJAX HTTP ${res.status}`);
       return res.text;
     } finally {
-      await browser.close();
+      await browser.close().catch(() => undefined);
     }
   },
 

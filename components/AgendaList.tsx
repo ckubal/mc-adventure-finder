@@ -246,6 +246,12 @@ export function AgendaList() {
         const scrapeData = await scrapeRes.json().catch(() => ({}));
         if (!scrapeRes.ok) {
           const err = scrapeData?.error ?? `HTTP ${scrapeRes.status}`;
+          if (scrapeRes.status === 429) {
+            setScrapeMessage(`Scrape busy (cron may be running). Waiting, then retrying batch ${batchIndex + 1}…`);
+            await new Promise((r) => setTimeout(r, 15_000));
+            batchIndex -= 1; // retry this batch
+            continue;
+          }
           setScrapeMessage(`Scrape failed on batch ${batchIndex + 1}: ${err}`);
           await fetchEvents();
           return;

@@ -8,6 +8,7 @@ import {
   sourceIdsForBatch,
   allBatchedSourceIds,
 } from "@/lib/scrapers/batches";
+import { tryAcquireScrapeLock, releaseScrapeLock } from "@/lib/scrapers/scrapeLock";
 
 registerAllScrapers();
 
@@ -15,6 +16,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
+  if (!tryAcquireScrapeLock()) {
+    return NextResponse.json(
+      { ok: false, totalUpserted: 0, results: [], error: "Scrape already in progress — try again shortly" },
+      { status: 429 }
+    );
+  }
+
+  try {
   const url = new URL(req.url ?? "/", "http://localhost");
   const dryRun = url.searchParams.get("dryRun") === "true";
   const onlySourceId = url.searchParams.get("sourceId")?.trim() || null;
@@ -95,4 +104,7 @@ export async function POST(req: NextRequest) {
     totalUpserted,
     results,
   });
+  } finally {
+    releaseScrapeLock();
+  }
 }
