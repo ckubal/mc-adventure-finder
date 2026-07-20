@@ -36,6 +36,40 @@ export async function fetchWithPlaywrightWait(
 }
 
 /**
+ * Fetch several URLs through a single browser instance (one Chromium launch, not one per
+ * URL). Use for sites that block plain HTTP but need multiple pages, e.g. month-scoped
+ * event listings. Pages that fail resolve to an empty string rather than aborting the rest.
+ */
+export async function fetchUrlsWithPlaywright(
+  urls: string[],
+  opts?: { waitSelector?: string; timeoutMs?: number }
+): Promise<string[]> {
+  const timeoutMs = opts?.timeoutMs ?? 30_000;
+  const browser = await launchChromium();
+  try {
+    const page = await browser.newPage();
+    const out: string[] = [];
+    for (const url of urls) {
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+        if (opts?.waitSelector) {
+          await page
+            .waitForSelector(opts.waitSelector, { timeout: timeoutMs, state: "attached" })
+            .catch(() => undefined);
+        }
+        await page.waitForTimeout(500);
+        out.push(await page.content());
+      } catch {
+        out.push("");
+      }
+    }
+    return out;
+  } finally {
+    await browser.close().catch(() => undefined);
+  }
+}
+
+/**
  * Fetch rendered HTML and attempt to auto-scroll to load more content.
  * Useful for infinite-scroll event listings (e.g. Eventbrite organizer pages).
  */

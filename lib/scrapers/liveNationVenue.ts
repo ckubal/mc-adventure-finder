@@ -62,6 +62,14 @@ export async function fetchLiveNationVenueEventsJson(opts: {
     const page = await browser.newPage();
     await page.goto(opts.showsUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
 
+    // The API 403s until the page's own scripts have run and established the session
+    // (cookies/bot-check). Wait for the page to make its own venue-events call, then
+    // paginate from the same browser context.
+    await page
+      .waitForResponse((r) => /livenationapi\.com\/v1\/venues\//i.test(r.url()), { timeout: 20_000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(1500);
+
     const all: LiveNationVenueEvent[] = [];
     for (let i = 0; i < maxPages; i++) {
       const offset = i * pageSize;

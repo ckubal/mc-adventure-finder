@@ -1,7 +1,6 @@
 import * as cheerio from "cheerio";
 import type { Scraper, RawEvent } from "../types";
-import { fetchHtml, fetchHtmlWithUrl } from "../fetchHtml";
-import { extractJsonLdEvent } from "../jsonLdEvent";
+import { fetchUrlsWithPlaywright } from "../fetchPlaywright";
 import { isoFromZonedParts } from "../timezone";
 
 const BASE_URL = "https://greenapplebooks.com";
@@ -32,9 +31,6 @@ function parseDate(dateStr: string, timeStr: string): string {
   return isoFromZonedParts({ year, month, day, hour: hours, minute: minutes, second: 0 });
 }
 
-const DETAIL_FETCH_TIMEOUT_MS = 8_000;
-const CONCURRENCY = 5;
-
 export const greenAppleScraper: Scraper = {
   id: "greenapple",
   name: "Green Apple Books",
@@ -42,15 +38,15 @@ export const greenAppleScraper: Scraper = {
   async fetch() {
     // Green Apple has month-scoped list views at /events/YYYY/MM. The root /events only
     // covers the current month; to hit a 60-day horizon we fetch multiple months.
+    // The site sits behind a WAF that 403s plain HTTP, so load them in a real browser.
     const now = new Date();
     const cutoff = new Date(now.getTime() + TARGET_DAYS_AHEAD * 24 * 60 * 60 * 1000);
-    const pages: string[] = [];
+    const urls: string[] = [];
 
     let y = now.getFullYear();
     let m = now.getMonth(); // 0-based
     for (let i = 0; i < 6; i++) {
-      const monthUrl = `${EVENTS_URL}/${y}/${String(m + 1).padStart(2, "0")}`;
-      pages.push(await fetchHtml(monthUrl));
+      urls.push(`${EVENTS_URL}/${y}/${String(m + 1).padStart(2, "0")}`);
 
       // advance to next month
       const nextMonth = new Date(y, m + 1, 1);
@@ -59,6 +55,11 @@ export const greenAppleScraper: Scraper = {
       if (nextMonth > cutoff) break;
     }
 
+    // The WAF serves a "Checking connection" interstitial first; wait for the real
+    // listing markup to appear rather than capturing the challenge page.
+    const pages = (
+      await fetchUrlsWithPlaywright(urls, { waitSelector: "article.event-list", timeoutMs: 30_000 })
+    ).filter(Boolean);
     return JSON.stringify(pages);
   },
 
@@ -132,40 +133,8 @@ export const greenAppleScraper: Scraper = {
 
     pages.forEach(parseMonthPage);
 
-    // Enrich with descriptions from detail pages
-    const enrichedEvents: RawEvent[] = [];
-    for (let i = 0; i < events.length; i += CONCURRENCY) {
-      const chunk = events.slice(i, i + CONCURRENCY);
-      const enriched = await Promise.all(
-        chunk.map(async (event) => {
-          try {
-            const { html: detailHtml } = await fetchHtmlWithUrl(event.sourceUrl, DETAIL_FETCH_TIMEOUT_MS);
-            const ld = extractJsonLdEvent(detailHtml);
-            let description: string | null = null;
-            if (ld?.description && typeof ld.description === "string") {
-              const desc = ld.description.replace(/<[^>]+>/g, "").trim();
-              if (desc.length > 0) description = desc;
-            } else {
-              // Fallback: extract from meta description or page content
-              const $ = cheerio.load(detailHtml);
-              const metaDesc = $('meta[name="description"]').attr("content");
-              if (metaDesc && metaDesc.length > 20) {
-                description = metaDesc.trim();
-              } else {
-                const content = $("main, article, .content, .event-detail").first().text().trim();
-                if (content && content.length > 50 && content.length < 500) {
-                  description = content.slice(0, 300);
-                }
-              }
-            }
-            return { ...event, description };
-          } catch {
-            return event;
-          }
-        })
-      );
-      enrichedEvents.push(...enriched);
-    }
-    return enrichedEvents;
+    // Detail pages sit behind the same WAF (403 on plain HTTP), and loading each one in a
+    // browser would be far too slow. The list pages already give us a description excerpt.
+    return events;
   },
 };
