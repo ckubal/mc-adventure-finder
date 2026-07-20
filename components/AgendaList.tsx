@@ -13,7 +13,6 @@ import {
   type AgendaGroupKey,
 } from "@/lib/agenda/groupEvents";
 import { VENUE_CATEGORIES } from "@/lib/venue-categories";
-import { SCRAPE_BATCHES } from "@/lib/scrapers/batches";
 import { EventCard } from "./EventCard";
 
 const ORDER: AgendaGroupKey[] = ["today", "this_week", "later"];
@@ -63,8 +62,6 @@ export function AgendaList() {
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
   const [updatingEventId, setUpdatingEventId] = useState<string | null>(null);
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
-  const [scrapeElapsed, setScrapeElapsed] = useState(0);
-  const scrapeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [allSources, setAllSources] = useState<{ sourceId: string; sourceName: string }[]>([]);
 
   const filtersInitialized = useRef(false);
@@ -221,94 +218,19 @@ export function AgendaList() {
     fetchUserStatus();
   }, [fetchUserStatus]);
 
-  const handleRefresh = useCallback(async (dryRun = false) => {
+  // Scraping now runs automatically in GitHub Actions (off the web server, every ~2h) and
+  // writes to Firebase. "Refresh" just re-reads the latest events from Firebase — it no
+  // longer launches a scrape on the web instance (that was exceeding its memory limit).
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     setScrapeMessage(null);
-    setScrapeElapsed(0);
-    scrapeIntervalRef.current = setInterval(() => {
-      setScrapeElapsed((n) => n + 1);
-    }, 1000);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600_000);
-    let totalUpserted = 0;
-    const allErrors: string[] = [];
-
     try {
-      for (let batchIndex = 0; batchIndex < SCRAPE_BATCHES.length; batchIndex++) {
-        setScrapeMessage(`Scraping batch ${batchIndex + 1}/${SCRAPE_BATCHES.length}…`);
-        const params = new URLSearchParams({ batch: String(batchIndex) });
-        if (dryRun) params.set("dryRun", "true");
-        const url = `${basePath}/api/scrape/run?${params.toString()}`;
-        const scrapeRes = await fetch(url, {
-          method: "POST",
-          signal: controller.signal,
-        });
-        const scrapeData = await scrapeRes.json().catch(() => ({}));
-        if (!scrapeRes.ok) {
-          const err = scrapeData?.error ?? `HTTP ${scrapeRes.status}`;
-          if (scrapeRes.status === 429) {
-            setScrapeMessage(`Scrape busy (cron may be running). Waiting, then retrying batch ${batchIndex + 1}…`);
-            await new Promise((r) => setTimeout(r, 15_000));
-            batchIndex -= 1; // retry this batch
-            continue;
-          }
-          setScrapeMessage(`Scrape failed on batch ${batchIndex + 1}: ${err}`);
-          await fetchEvents();
-          return;
-        }
-        totalUpserted += scrapeData?.totalUpserted ?? 0;
-        const results = scrapeData?.results ?? [];
-        allErrors.push(
-          ...results.flatMap((r: { sourceId: string; errors: string[] }) =>
-            (r.errors ?? []).map((e: string) => `${r.sourceId}: ${e}`)
-          )
-        );
-      }
-
-      clearTimeout(timeoutId);
-      if (scrapeIntervalRef.current) {
-        clearInterval(scrapeIntervalRef.current);
-        scrapeIntervalRef.current = null;
-      }
-
-      if (dryRun) {
-        setScrapeMessage(
-          totalUpserted > 0
-            ? `Test run: would save ${totalUpserted} events (nothing written to Firebase).`
-            : allErrors.length > 0
-              ? `Test run: 0 events. First error: ${allErrors[0].slice(0, 60)}…`
-              : "Test run: 0 events. Check server logs for details."
-        );
-      } else if (totalUpserted > 0) {
-        setScrapeMessage(`Scraped ${totalUpserted} events across ${SCRAPE_BATCHES.length} batches.`);
-      } else if (allErrors.length > 0) {
-        setScrapeMessage(`Scraped 0 events. First error: ${allErrors[0].slice(0, 80)}…`);
-      } else {
-        setScrapeMessage("Scrape finished with 0 events. Check server logs for details.");
-      }
-      if (!dryRun) await fetchEvents();
-    } catch (e) {
-      clearTimeout(timeoutId);
-      if (scrapeIntervalRef.current) {
-        clearInterval(scrapeIntervalRef.current);
-        scrapeIntervalRef.current = null;
-      }
-      const isTimeout = e instanceof Error && e.name === "AbortError";
-      const msg = isTimeout
-        ? "Scrape timed out. Some batches may have completed—check the list."
-        : e instanceof Error
-          ? e.message
-          : String(e);
-      setScrapeMessage(`Scrape failed: ${msg}`);
-      if (!isTimeout) console.error(e);
       await fetchEvents();
+      setScrapeMessage("Updated with the latest events.");
+    } catch {
+      setScrapeMessage("Couldn’t refresh just now — try again in a moment.");
     } finally {
       setRefreshing(false);
-      setScrapeElapsed(0);
-      if (scrapeIntervalRef.current) {
-        clearInterval(scrapeIntervalRef.current);
-        scrapeIntervalRef.current = null;
-      }
     }
   }, [fetchEvents]);
 
@@ -602,7 +524,7 @@ export function AgendaList() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => handleRefresh(false)}
+              onClick={() => handleRefresh()}
               disabled={refreshing}
               className="px-3 py-1.5 text-sm font-bold border-2 border-black"
               style={{
@@ -626,15 +548,10 @@ export function AgendaList() {
                 }
               }}
             >
-              {refreshing ? `Scraping sources… ${scrapeElapsed}s` : "🔄 Refresh"}
+              {refreshing ? "Refreshing…" : "🔄 Refresh"}
             </button>
           </div>
         </div>
-        {refreshing && (
-          <p className="text-sm font-bold" style={{ color: "#000", textShadow: "1px 1px 0px #fff" }} role="status">
-            Can take 20–60s. Don’t navigate away.
-          </p>
-        )}
         {scrapeMessage && !refreshing && (
           <p
             className="text-sm font-bold"
