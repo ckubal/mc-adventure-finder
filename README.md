@@ -1,92 +1,96 @@
-**mc-adventure-finder** — SF Bay Area events aggregator (m+c sf adventure finder). Lives at [mc-adventure-finder.onrender.com](https://mc-adventure-finder.onrender.com/).  
-→ **Render (recommended):** [DEPLOY_RENDER.md](./DEPLOY_RENDER.md) — use your existing Render account; no Hostinger upgrade.  
-→ **Hostinger:** [DEPLOY_HOSTINGER.md](./DEPLOY_HOSTINGER.md) — requires Node.js–capable plan.
+# mc-adventure-finder
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+**m+c sf adventure finder** — a San Francisco Bay Area events aggregator. It scrapes ~20 SF
+venues and listing sites, stores everything in Firestore, and shows it as a single scannable
+agenda. Live at **[mc-adventure-finder.onrender.com](https://mc-adventure-finder.onrender.com/)**.
 
-## Getting Started
+Built with [Next.js](https://nextjs.org) (App Router) + Firestore, deployed on Render.
 
-First, run the development server:
+## How it works
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+Scrapers (GitHub Actions, every 2h)  ──►  Firestore "events"  ──►  Next.js API/UI (Render)
+      lib/scrapers/*  +  scripts/scrape.ts        cache              /api/events → agenda
 ```
 
-Open [http://localhost:3000/metime](http://localhost:3000/metime) with your browser to see the result (app uses base path `/metime` by default).
+- **Scraping runs in GitHub Actions, not on the web server.** A scheduled workflow
+  ([`.github/workflows/scrape.yml`](.github/workflows/scrape.yml)) runs [`scripts/scrape.ts`](scripts/scrape.ts)
+  every 2 hours inside the runner (which has plenty of memory for headless Chrome) and writes
+  results straight to Firestore. This keeps browser-heavy scraping off Render's small web
+  instance, which was exceeding its memory limit when it tried to launch Chrome itself.
+- **The web app only reads.** `GET /api/events` returns upcoming events from Firestore; the
+  page never scrapes on load. The UI defaults to the next ~month with a "load more" for events
+  further out, plus source and date filters. The **Refresh** button just re-reads Firestore.
+- **Idempotent upserts.** Each event has a stable id (`sourceEventId`/`sourceUrl`), so re-scrapes
+  update in place instead of creating duplicates.
 
-### If the dev server hangs (page never loads)
+## Sources
 
-This project is in **Dropbox**. Dropbox sync can make the Next.js dev server hang on the first request because Turbopack does a lot of file I/O when compiling. **Run the app from a folder outside Dropbox**:
+Music & clubs: The Independent, Bottom of the Hill, Rickshaw Stop, Cafe du Nord, Brick & Mortar,
+Make-Out Room, 1015 Folsom, SFJazz, The Faight, Envelop · Comedy: Cobb's, Punch Line · Books &
+talks: Green Apple Books, The Booksmith, Manny's · Art & film: Gray Area, The Castro Theatre ·
+Sports: SF Giants, Golden State Warriors (home games) · Aggregator: Funcheap SF.
+
+Several venues sit behind bot protection (Cloudflare / WAFs) or load events via internal JSON
+APIs, so those scrapers drive a real browser via Playwright. See
+[SCRAPER_TESTING.md](./SCRAPER_TESTING.md) for how to preview and add scrapers.
+
+## Local development
 
 ```bash
-# Example: copy project to a local folder, then run from there
-cp -R "/Users/ckubal/Dropbox/coding-projects-25/sf events" ~/mc-adventure-finder-local
-cd ~/mc-adventure-finder-local
 npm install
 npm run dev
+# open http://localhost:3000/metime   (the app uses base path /metime by default)
 ```
 
-Then open http://localhost:3000/metime. Keep using Dropbox for backup; develop from the local copy and sync changes when you’re done (or use git to move code between the two).
+Set env vars in `.env.local` (see [`.env.local.example`](./.env.local.example)) — Firebase client
+config plus a Firebase Admin service account (`FIREBASE_SERVICE_ACCOUNT_PATH` or
+`FIREBASE_SERVICE_ACCOUNT_KEY`) so the API can read/write Firestore.
 
-### "The requested action is invalid" when signing in with Google
+> **Dropbox note:** this project lives in Dropbox, and Dropbox sync can make the Turbopack dev
+> server hang on first compile. If it hangs, develop from a copy outside Dropbox
+> (`cp -R "…/sf events" ~/mc-adventure-finder-local && cd ~/mc-adventure-finder-local && npm run dev`)
+> and sync back via git.
 
-Firebase Auth shows this when the app’s origin isn’t allowed or the OAuth client is misconfigured. Fix it in the Firebase and Google Cloud consoles:
+## Running scrapers manually
 
-1. **Firebase Console** → [Authentication](https://console.firebase.google.com/project/sf-events-aggregator/authentication/providers) → **Sign-in method**: ensure **Google** is **Enabled** and has a Web client ID / secret (or use the same GCP project so it’s linked).
+```bash
+npm run scrape                 # all sources → Firestore
+npm run scrape -- --batch 3    # one batch (see lib/scrapers/batches.ts)
+npm run scrape -- --dry-run    # fetch + parse only, no writes
+```
 
-2. **Firebase Console** → Authentication → **Settings** (tab) → **Authorized domains**. Add every origin where the app runs, for example:
-   - `localhost` (for `http://localhost:3000`)
-   - Your production host (e.g. `your-app.vercel.app` or your custom domain)  
-   No port or scheme—just the host.
+Needs the same Firebase env as the app. To preview a single source's parsed output without
+writing, use the test endpoint: `GET /api/scrape/test?sourceId=<id>` (see SCRAPER_TESTING.md).
 
-3. **Google Cloud Console** → [APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials?project=sf-events-aggregator) → open the **Web client** used by Firebase:
-   - **Authorized JavaScript origins**: add `http://localhost:3000` and your production URL (e.g. `https://your-app.vercel.app`).
-   - **Authorized redirect URIs**: must include `https://sf-events-aggregator.firebaseapp.com/__/auth/handler` (Firebase usually adds this when you enable Google sign-in).
+The scheduled workflow reads its credentials from repo **Actions secrets**
+(`FIREBASE_SERVICE_ACCOUNT_KEY`, `FIREBASE_PROJECT_ID`). You can also trigger it manually from the
+GitHub **Actions** tab ("Scrape events into Firebase" → Run workflow), optionally for one batch.
 
-4. **Env**: Ensure `.env.local` has `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=sf-events-aggregator.firebaseapp.com` and the correct `NEXT_PUBLIC_FIREBASE_API_KEY` for project `sf-events-aggregator`.
+## Deployment
 
-After changing authorized domains or OAuth client settings, try signing in again in a new tab.
+Render builds and deploys automatically on push to `main` (`npm run build` / `npm start`). Set the
+runtime env vars (Firebase config, service account) in the Render dashboard. See
+[DEPLOY_RENDER.md](./DEPLOY_RENDER.md); a Hostinger path is documented in
+[DEPLOY_HOSTINGER.md](./DEPLOY_HOSTINGER.md).
 
-### Hosting at weirdlittleideas.com/metime
+## Troubleshooting
 
-This project (**mc-adventure-finder**) is set up to live at `https://weirdlittleideas.com/metime`.
+### "The requested action is invalid" on Google sign-in
 
-1. **Base path**  
-   The app uses `NEXT_PUBLIC_BASE_PATH=/metime` by default (see `.env.local.example`). For production you can set the same in Vercel (or leave unset to use the default).
+Firebase Auth shows this when the app's origin isn't allowed or the OAuth client is misconfigured:
 
-2. **Local dev**  
-   Run `npm run dev` and open [http://localhost:3000/metime](http://localhost:3000/metime). To run at the root instead, set `NEXT_PUBLIC_BASE_PATH=` (empty) in `.env.local`.
+1. **Firebase Console → Authentication → Sign-in method:** ensure **Google** is enabled.
+2. **Authentication → Settings → Authorized domains:** add every host the app runs on (e.g.
+   `localhost`, your production host) — host only, no scheme or port.
+3. **Google Cloud Console → APIs & Services → Credentials → Web client:** add the app origins to
+   **Authorized JavaScript origins**, and ensure **Authorized redirect URIs** includes
+   `https://sf-events-aggregator.firebaseapp.com/__/auth/handler`.
+4. **Env:** `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=sf-events-aggregator.firebaseapp.com` and the correct
+   `NEXT_PUBLIC_FIREBASE_API_KEY`.
 
-3. **Point weirdlittleideas.com at this app**  
-   - **Option A – Vercel:** Deploy this repo as the **mc-adventure-finder** project. In the *main* weirdlittleideas.com project, add a rewrite:
-     - In the main project’s `vercel.json`:  
-       `"rewrites": [{ "source": "/metime/:path*", "destination": "https://<mc-adventure-finder-vercel-url>/metime/:path*" }]`
-   - **Option B – Same host/reverse proxy:** Proxy `/metime` to this app’s server.
+### Base path / hosting at weirdlittleideas.com/metime
 
-4. **Firebase Auth**  
-   Add `weirdlittleideas.com` to Firebase Console → Authentication → Settings → **Authorized domains**. In Google Cloud OAuth client, add `https://weirdlittleideas.com` to **Authorized JavaScript origins**.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The app uses `NEXT_PUBLIC_BASE_PATH=/metime` by default; set it empty to serve at the root. To host
+under `weirdlittleideas.com/metime`, proxy/rewrite `/metime/:path*` to this app and add the domain
+to Firebase **Authorized domains** + the Google OAuth client's **Authorized JavaScript origins**.
